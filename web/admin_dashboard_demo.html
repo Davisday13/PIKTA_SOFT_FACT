@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard - Restaurante Inteligente</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #f8fafc; color: #1e293b; }
+        .sidebar { background: #1e293b; color: white; min-width: 260px; height: 100vh; position: sticky; top: 0; }
+        .card { background: white; border-radius: 16px; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); border: 1px solid #e2e8f0; }
+        .stat-card { transition: transform 0.2s ease; }
+        .stat-card:hover { transform: translateY(-2px); }
+        .nav-item { cursor: pointer; transition: all 0.2s; }
+        .nav-item:hover { background: #334155; }
+        .nav-item.active { background: #2563eb; color: white; font-weight: 700; }
+    </style>
+</head>
+<body class="flex">
+    <div id="root" class="flex w-full"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        function Sidebar({ currentTab, setCurrentTab }) {
+            const menu = [
+                { id: 'dashboard', icon: '📊', label: 'Dashboard' },
+                { id: 'menu', icon: '🍔', label: 'Menú' },
+                { id: 'inventory', icon: '📦', label: 'Inventario' },
+                { id: 'sales', icon: '🧾', label: 'Ventas' },
+                { id: 'config', icon: '⚙️', label: 'Configuración' }
+            ];
+            return (
+                <div className="sidebar p-6 flex flex-col">
+                    <div className="text-2xl font-extrabold mb-10 flex items-center gap-2">
+                        🚀 Admin<span className="text-blue-400">Rest</span>
+                    </div>
+                    <nav className="flex-1 space-y-2">
+                        {menu.map((m) => (
+                            <div 
+                                key={m.id} 
+                                onClick={() => setCurrentTab(m.id)}
+                                className={`nav-item flex items-center gap-3 p-3 rounded-xl ${currentTab === m.id ? 'active' : 'text-slate-400'}`}
+                            >
+                                <span className="text-xl">{m.icon}</span>
+                                {m.label}
+                            </div>
+                        ))}
+                    </nav>
+                </div>
+            );
+        }
+
+        function InventoryView() {
+            const [inventory, setInventory] = useState([]);
+            const [loading, setLoading] = useState(true);
+
+            const fetchInventory = async () => {
+                const res = await fetch('/api/inventory');
+                const data = await res.json();
+                setInventory(data);
+                setLoading(false);
+            };
+
+            useEffect(() => { fetchInventory(); }, []);
+
+            const updateStock = async (id, amount) => {
+                await fetch('/api/inventory/update', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id, amount })
+                });
+                fetchInventory(); // Refresh
+            };
+
+            if (loading) return <div className="p-10 text-center">Cargando inventario real...</div>;
+
+            return (
+                <div className="space-y-8">
+                    <header className="flex justify-between items-center">
+                        <div>
+                            <h1 className="text-3xl font-extrabold text-slate-900">Control de Inventario</h1>
+                            <p className="text-slate-500">Stock de ingredientes en tiempo real</p>
+                        </div>
+                        <div className="flex gap-3">
+                            <button className="bg-red-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-red-700 transition-all shadow-lg">
+                                📦 Registrar Entrada
+                            </button>
+                        </div>
+                    </header>
+
+                    <div className="grid grid-cols-1 gap-4">
+                        {inventory.map((item) => (
+                            <div key={item.id} className="card p-6 flex items-center justify-between">
+                                <div className="flex items-center gap-6">
+                                    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-xl ${item.status === 'OK' ? 'bg-green-100' : 'bg-red-100'}`}>
+                                        {item.status === 'OK' ? '✅' : '⚠️'}
+                                    </div>
+                                    <div>
+                                        <h3 className="font-bold text-slate-900 text-lg">{item.name}</h3>
+                                        <p className="text-slate-500 text-sm">Mínimo requerido: {item.min} {item.unit}</p>
+                                    </div>
+                                </div>
+                                <div className="flex items-center gap-12">
+                                    <div className="text-right">
+                                        <div className="text-2xl font-black text-slate-900">{item.stock} <span className="text-slate-400 text-sm">{item.unit}</span></div>
+                                        <div className={`text-xs font-bold uppercase tracking-wider ${item.status === 'OK' ? 'text-green-600' : 'text-red-600'}`}>
+                                            Estado: {item.status}
+                                        </div>
+                                    </div>
+                                    <button 
+                                        onClick={() => updateStock(item.id, 1)}
+                                        className="bg-blue-600 text-white w-10 h-10 rounded-full flex items-center justify-center hover:bg-blue-700 transition-all"
+                                    >
+                                        ➕
+                                    </button>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            );
+        }
+
+        function App() {
+            const [currentTab, setCurrentTab] = useState('inventory'); // Start in Inventory to show functionality
+
+            return (
+                <div className="flex w-full">
+                    <Sidebar currentTab={currentTab} setCurrentTab={setCurrentTab} />
+                    <main className="flex-1 p-8 bg-slate-50 min-h-screen">
+                        <div className="max-w-6xl mx-auto">
+                            {currentTab === 'inventory' ? <InventoryView /> : <div className="p-10 text-center text-slate-400">Módulo en construcción...</div>}
+                        </div>
+                    </main>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

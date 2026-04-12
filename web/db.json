@@ -1,0 +1,46 @@
+{
+  "inventory": [
+    {
+      "id": 1,
+      "name": "Carne molida",
+      "stock": 2.999999999999999,
+      "unit": "kg",
+      "min": 5,
+      "status": "BAJO"
+    },
+    {
+      "id": 2,
+      "name": "Pan de hamburguesa",
+      "stock": 32,
+      "unit": "u",
+      "min": 40,
+      "status": "BAJO"
+    },
+    {
+      "id": 3,
+      "name": "Pollo filete",
+      "stock": 12.5,
+      "unit": "kg",
+      "min": 4,
+      "status": "OK"
+    },
+    {
+      "id": 4,
+      "name": "Papas crudas",
+      "stock": 1.2,
+      "unit": "kg",
+      "min": 6,
+      "status": "CRITICO"
+    },
+    {
+      "id": 5,
+      "name": "Aceite freir",
+      "stock": 8,
+      "unit": "litros",
+      "min": 2,
+      "status": "OK"
+    }
+  ],
+  "orders": [],
+  "sales": 1335.5
+}

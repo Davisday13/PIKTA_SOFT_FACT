@@ -1,0 +1,128 @@
+{
+  "name": "Restaurante — Alertas de Inventario",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "hours", "hoursInterval": 4 }] }
+      },
+      "id": "trigger-schedule",
+      "name": "Revisar cada 4 horas",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "notes": "Revisa el inventario automáticamente cada 4 horas. Ajusta la frecuencia según necesites."
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT i.ingrediente, i.cantidad, i.unidad, i.stock_minimo, i.proveedor_id, p.nombre as proveedor_nombre, p.telefono as proveedor_tel FROM inventario i LEFT JOIN proveedores p ON i.proveedor_id = p.id WHERE i.cantidad <= i.stock_minimo AND i.activo = true ORDER BY (i.cantidad::float / NULLIF(i.stock_minimo, 0)) ASC"
+      },
+      "id": "consultar-stock-bajo",
+      "name": "Buscar stock bajo",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [460, 300],
+      "notes": "Obtiene todos los ingredientes por debajo del mínimo configurado"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $input.all().length }}",
+              "operation": "larger",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "id": "hay-alertas",
+      "name": "¿Hay items bajos?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [680, 300],
+      "notes": "Solo continúa si hay ingredientes con stock bajo"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Construye el mensaje de alerta para el dueño\nconst items = $input.all().map(i => i.json);\n\nconst lista = items.map(item => {\n  const pct = Math.round((item.cantidad / item.stock_minimo) * 100);\n  const emoji = pct < 30 ? '🔴' : pct < 60 ? '🟡' : '🟢';\n  return `${emoji} *${item.ingrediente}*: ${item.cantidad} ${item.unidad} (mínimo: ${item.stock_minimo} ${item.unidad})`;\n}).join('\\n');\n\nconst mensaje = `⚠️ *ALERTA DE INVENTARIO*\n\nLos siguientes ingredientes necesitan reposición:\n\n${lista}\n\n📋 Se ha generado la lista de compras automáticamente.\nRevisa el sistema para ver el detalle.`;\n\nreturn [{ json: { mensaje, items, fecha: new Date().toISOString() } }];"
+      },
+      "id": "preparar-alerta",
+      "name": "Preparar mensaje de alerta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 200],
+      "notes": "Formatea el mensaje de WhatsApp para el dueño"
+    },
+    {
+      "parameters": {
+        "url": "https://graph.facebook.com/v18.0/{{ $env.WHATSAPP_PHONE_NUMBER_ID }}/messages",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "=",
+              "value": "={{ JSON.stringify({ messaging_product: 'whatsapp', to: $env.DUENO_TELEFONO, type: 'text', text: { body: $json.mensaje } }) }}"
+            }
+          ]
+        }
+      },
+      "id": "notificar-dueno",
+      "name": "Notificar al dueño",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1120, 200],
+      "notes": "Envía WhatsApp al dueño. Configura DUENO_TELEFONO en variables de entorno (ej: 50769876543)"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Genera una orden de compra por proveedor\nconst items = $input.first().json.items;\n\n// Agrupar por proveedor\nconst porProveedor = {};\nitems.forEach(item => {\n  const key = item.proveedor_id || 'sin_proveedor';\n  if (!porProveedor[key]) {\n    porProveedor[key] = { proveedor: item.proveedor_nombre || 'Sin proveedor', tel: item.proveedor_tel, items: [] };\n  }\n  const cantidadSugerida = item.stock_minimo * 3; // Comprar para 3 veces el mínimo\n  porProveedor[key].items.push({\n    ingrediente: item.ingrediente,\n    cantidadActual: item.cantidad,\n    unidad: item.unidad,\n    cantidadSugerida\n  });\n});\n\nreturn Object.values(porProveedor).map(p => ({ json: p }));"
+      },
+      "id": "generar-orden-compra",
+      "name": "Generar orden de compra",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 400],
+      "notes": "Agrupa los items por proveedor y calcula cantidades sugeridas a comprar"
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "table": "ordenes_compra",
+        "columns": "proveedor, items, estado, created_at",
+        "values": "={{ $json.proveedor }}, {{ JSON.stringify($json.items) }}, 'PENDIENTE', NOW()"
+      },
+      "id": "registrar-orden-db",
+      "name": "Registrar orden en DB",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [1340, 400],
+      "notes": "Guarda la orden de compra en la base de datos para seguimiento"
+    }
+  ],
+  "connections": {
+    "Revisar cada 4 horas": { "main": [[{ "node": "Buscar stock bajo", "type": "main", "index": 0 }]] },
+    "Buscar stock bajo": { "main": [[{ "node": "¿Hay items bajos?", "type": "main", "index": 0 }]] },
+    "¿Hay items bajos?": {
+      "main": [
+        [{ "node": "Preparar mensaje de alerta", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Preparar mensaje de alerta": {
+      "main": [[
+        { "node": "Notificar al dueño", "type": "main", "index": 0 },
+        { "node": "Generar orden de compra", "type": "main", "index": 0 }
+      ]]
+    },
+    "Generar orden de compra": { "main": [[{ "node": "Registrar orden en DB", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "_comentarios": {
+    "variables_requeridas": [
+      "WHATSAPP_PHONE_NUMBER_ID",
+      "DUENO_TELEFONO — Número del dueño para recibir alertas (formato: 507XXXXXXXX)"
+    ],
+    "como_importar": "En n8n: Menú > Import from JSON > pega este archivo"
+  }
+}

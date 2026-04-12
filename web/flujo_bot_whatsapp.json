@@ -1,0 +1,196 @@
+{
+  "name": "Restaurante — Bot WhatsApp Pedidos",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp-webhook",
+        "responseMode": "responseNode"
+      },
+      "id": "webhook-entrada",
+      "name": "Webhook WhatsApp",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "notes": "Recibe mensajes entrantes de WhatsApp Business API. Configura esta URL en Meta Developers > Webhooks"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extrae datos del mensaje entrante de WhatsApp\nconst body = $input.first().json;\nconst entry = body.entry?.[0];\nconst change = entry?.changes?.[0];\nconst message = change?.value?.messages?.[0];\nconst contact = change?.value?.contacts?.[0];\n\nif (!message) {\n  return [{ json: { skip: true } }];\n}\n\nreturn [{\n  json: {\n    from: message.from,           // Número del cliente\n    name: contact?.profile?.name || 'Cliente',\n    messageId: message.id,\n    type: message.type,           // text, interactive, etc.\n    text: message.text?.body || '',\n    timestamp: message.timestamp\n  }\n}];"
+      },
+      "id": "parse-message",
+      "name": "Parsear mensaje",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300],
+      "notes": "Extrae número, nombre y texto del payload de WhatsApp"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.text.toLowerCase() }}",
+              "operation": "contains",
+              "value2": "hola"
+            }
+          ]
+        }
+      },
+      "id": "check-saludo",
+      "name": "¿Es saludo?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [680, 300],
+      "notes": "Detecta si el cliente está iniciando una conversación"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Construye el mensaje de bienvenida con el menú\nconst nombre = $input.first().json.name;\n\nconst menu = `Hola ${nombre}! Bienvenido a *Restaurante XYZ* 🍔\n\nElige una opción:\n\n*--- COMBOS ---*\n1️⃣ Combo Clásico - $5.50\n   Hamburguesa + papas + refresco\n\n2️⃣ Combo Doble - $7.50\n   Hamburguesa doble + papas + refresco\n\n3️⃣ Combo Pollo - $6.00\n   Sándwich de pollo + papas + refresco\n\n*--- EXTRAS ---*\n4️⃣ Papas fritas - $1.50\n5️⃣ Refresco - $1.00\n6️⃣ Agua - $0.75\n\n*--- OTROS ---*\n📞 Hablar con un humano: escribe AGENTE\n\nResponde con el número de tu elección:`;\n\nreturn [{ json: { ...($input.first().json), menuText: menu } }];"
+      },
+      "id": "preparar-menu",
+      "name": "Preparar menú",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 200],
+      "notes": "Construye el texto del menú. Edita aquí los productos y precios"
+    },
+    {
+      "parameters": {
+        "url": "https://graph.facebook.com/v18.0/{{ $env.WHATSAPP_PHONE_NUMBER_ID }}/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "facebookGraphApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "=",
+              "value": "={{ JSON.stringify({ messaging_product: 'whatsapp', to: $json.from, type: 'text', text: { body: $json.menuText } }) }}"
+            }
+          ]
+        }
+      },
+      "id": "enviar-menu",
+      "name": "Enviar menú al cliente",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1120, 200],
+      "notes": "Envía el menú por WhatsApp. Requiere credencial de Facebook Graph API"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Detecta si el mensaje es una selección del menú (número del 1 al 6)\nconst text = $input.first().json.text.trim();\nconst seleccion = parseInt(text);\n\nconst MENU = {\n  1: { nombre: 'Combo Clásico', precio: 5.50, ingredientes: { carne: 150, pan: 1, papa: 200, refresco: 1 } },\n  2: { nombre: 'Combo Doble', precio: 7.50, ingredientes: { carne: 300, pan: 1, papa: 200, refresco: 1 } },\n  3: { nombre: 'Combo Pollo', precio: 6.00, ingredientes: { pollo: 180, pan: 1, papa: 200, refresco: 1 } },\n  4: { nombre: 'Papas fritas', precio: 1.50, ingredientes: { papa: 150 } },\n  5: { nombre: 'Refresco', precio: 1.00, ingredientes: { refresco: 1 } },\n  6: { nombre: 'Agua', precio: 0.75, ingredientes: { agua: 1 } },\n};\n\nif (seleccion >= 1 && seleccion <= 6) {\n  const item = MENU[seleccion];\n  const numeroPedido = 'WA-' + Date.now().toString().slice(-6);\n  return [{\n    json: {\n      ...($input.first().json),\n      pedido: {\n        numero: numeroPedido,\n        items: [item],\n        total: item.precio,\n        estado: 'RECIBIDO',\n        canal: 'WHATSAPP',\n        timestamp: new Date().toISOString()\n      },\n      esSeleccionValida: true\n    }\n  }];\n}\n\nreturn [{ json: { ...($input.first().json), esSeleccionValida: false } }];"
+      },
+      "id": "procesar-seleccion",
+      "name": "Procesar selección",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 400],
+      "notes": "Convierte la respuesta del cliente en un pedido estructurado. Edita aquí el menú e ingredientes"
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "table": "pedidos",
+        "columns": "numero, cliente_telefono, cliente_nombre, items, total, estado, canal, created_at",
+        "values": "={{ $json.pedido.numero }}, {{ $json.from }}, {{ $json.name }}, {{ JSON.stringify($json.pedido.items) }}, {{ $json.pedido.total }}, 'RECIBIDO', 'WHATSAPP', NOW()"
+      },
+      "id": "guardar-pedido-db",
+      "name": "Guardar pedido en DB",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [1120, 350],
+      "notes": "Guarda el pedido en PostgreSQL. Configura las credenciales de la base de datos"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE inventario SET cantidad = cantidad - $1 WHERE ingrediente = $2 AND cantidad >= $1 RETURNING ingrediente, cantidad"
+      },
+      "id": "descontar-inventario",
+      "name": "Descontar inventario",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [1120, 500],
+      "notes": "Descuenta automáticamente los ingredientes del pedido del inventario"
+    },
+    {
+      "parameters": {
+        "url": "https://graph.facebook.com/v18.0/{{ $env.WHATSAPP_PHONE_NUMBER_ID }}/messages",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "=",
+              "value": "={{ JSON.stringify({ messaging_product: 'whatsapp', to: $json.from, type: 'text', text: { body: `✅ *Pedido confirmado!*\n\nNúmero: *${$json.pedido.numero}*\nProducto: ${$json.pedido.items[0].nombre}\nTotal: $${$json.pedido.total}\n\n⏱ Tiempo estimado: 10-15 minutos\n\nTe avisaremos cuando esté listo. Gracias ${$json.name}! 🙏` } }) }}"
+            }
+          ]
+        }
+      },
+      "id": "confirmar-pedido-cliente",
+      "name": "Confirmar al cliente",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1340, 350],
+      "notes": "Envía confirmación con número de pedido al cliente"
+    },
+    {
+      "parameters": {
+        "url": "{{ $env.KDS_WEBHOOK_URL }}",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "=",
+              "value": "={{ JSON.stringify({ pedido: $json.pedido, cliente: $json.name, canal: 'WHATSAPP' }) }}"
+            }
+          ]
+        }
+      },
+      "id": "enviar-cocina",
+      "name": "Enviar a cocina (KDS)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1340, 500],
+      "notes": "Envía el pedido al sistema KDS de cocina. Configura KDS_WEBHOOK_URL en variables de entorno"
+    }
+  ],
+  "connections": {
+    "Webhook WhatsApp": { "main": [[{ "node": "Parsear mensaje", "type": "main", "index": 0 }]] },
+    "Parsear mensaje": { "main": [[{ "node": "¿Es saludo?", "type": "main", "index": 0 }]] },
+    "¿Es saludo?": {
+      "main": [
+        [{ "node": "Preparar menú", "type": "main", "index": 0 }],
+        [{ "node": "Procesar selección", "type": "main", "index": 0 }]
+      ]
+    },
+    "Preparar menú": { "main": [[{ "node": "Enviar menú al cliente", "type": "main", "index": 0 }]] },
+    "Procesar selección": { "main": [[{ "node": "Guardar pedido en DB", "type": "main", "index": 0 }]] },
+    "Guardar pedido en DB": { "main": [[{ "node": "Descontar inventario", "type": "main", "index": 0 }]] },
+    "Descontar inventario": {
+      "main": [[
+        { "node": "Confirmar al cliente", "type": "main", "index": 0 },
+        { "node": "Enviar a cocina (KDS)", "type": "main", "index": 0 }
+      ]]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "_comentarios": {
+    "variables_requeridas": [
+      "WHATSAPP_PHONE_NUMBER_ID — ID del número en Meta Business",
+      "KDS_WEBHOOK_URL — URL del endpoint del sistema KDS",
+      "DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASS — Credenciales PostgreSQL"
+    ],
+    "como_importar": "En n8n: Menú > Import from JSON > pega este archivo",
+    "credenciales_requeridas": [
+      "Facebook Graph API (para WhatsApp)",
+      "PostgreSQL connection"
+    ]
+  }
+}

@@ -1,0 +1,1245 @@
+class APIHandler(BaseHTTPRequestHandler):
+    def _set_headers(self, status=200):
+        self.send_response(status)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.end_headers()
+
+    def do_OPTIONS(self):
+        """Maneja peticiones preflight de navegadores web (CORS)."""
+        self._set_headers(204)
+
+    def do_GET(self):
+        try:
+            db = DatabaseManager(DB_NAME)
+            
+            # Página de inicio amigable para verificar conexión
+            if self.path == "/" or self.path == "/api" or self.path == "/web":
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/html; charset=utf-8')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                
+                html_content = f"""
+                <!DOCTYPE html>
+                <html lang="es">
+                <head>
+                    <meta charset="UTF-8">
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                    <title>PIK'TA SOFT - SISTEMA WEB COMPLETO</title>
+                    <script src="https://cdn.tailwindcss.com"></script>
+                    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;800&display=swap" rel="stylesheet">
+                    <style>
+                        body {{ font-family: 'Plus Jakarta Sans', sans-serif; background-color: #0F172A; color: #F8FAFC; overflow-x: hidden; }}
+                        .bg-panel {{ background-color: #1E293B; }}
+                        .border-panel {{ border-color: #334155; }}
+                        .accent-blue {{ color: #3B82F6; }}
+                        .bg-accent-blue {{ background-color: #3B82F6; }}
+                        .input-field {{ background-color: #334155; border: 1px solid #475569; color: white; padding: 12px; border-radius: 12px; width: 100%; outline: none; }}
+                        .input-field:focus {{ border-color: #3B82F6; }}
+                        .btn-primary {{ background-color: #3B82F6; color: white; font-weight: bold; padding: 12px; border-radius: 12px; transition: all 0.2s; width: 100%; }}
+                        .btn-primary:hover {{ background-color: #2563EB; transform: translateY(-2px); }}
+                        .btn-success {{ background-color: #10B981; color: white; font-weight: bold; padding: 12px; border-radius: 12px; transition: all 0.2s; width: 100%; }}
+                        .btn-success:hover {{ background-color: #059669; transform: translateY(-2px); }}
+                        .module-card {{ background-color: #1E293B; border: 1px solid #334155; padding: 24px; border-radius: 20px; cursor: pointer; transition: all 0.3s; }}
+                        .module-card:hover {{ border-color: #3B82F6; background-color: #1e293b; transform: translateY(-5px); box-shadow: 0 10px 25px -5px rgba(59, 130, 246, 0.2); }}
+                        .hide {{ display: none !important; }}
+                        ::-webkit-scrollbar {{ width: 8px; }}
+                        ::-webkit-scrollbar-track {{ background: #0F172A; }}
+                        ::-webkit-scrollbar-thumb {{ background: #334155; border-radius: 10px; }}
+                        .stat-card {{ background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border: 1px solid #334155; }}
+                        .modal-overlay {{ background-color: rgba(0,0,0,0.8); backdrop-filter: blur(4px); }}
+                        .receipt-font {{ font-family: 'Courier New', Courier, monospace; }}
+                    </style>
+                </head>
+                <body>
+                    <!-- MODAL DE FACTURA -->
+                    <div id="receipt-modal" class="fixed inset-0 z-[100] flex items-center justify-center p-4 modal-overlay hide">
+                        <div class="bg-white text-black p-8 rounded-xl w-full max-w-sm shadow-2xl overflow-y-auto max-h-[90vh]">
+                            <div class="receipt-font text-xs">
+                                <div class="text-center mb-4">
+                                    <h3 class="font-black text-lg">PIK'TA SOFT</h3>
+                                    <p>SISTEMA DE RESTAURANTE</p>
+                                    <p id="receipt-date" class="text-[10px] mt-1"></p>
+                                </div>
+                                <div class="border-t border-b border-black py-2 my-2">
+                                    <p id="receipt-header-info"></p>
+                                </div>
+                                <div id="receipt-items" class="space-y-1"></div>
+                                <div class="border-t border-black mt-4 pt-2">
+                                    <div class="flex justify-between font-black text-sm">
+                                        <span>TOTAL</span>
+                                        <span id="receipt-total"></span>
+                                    </div>
+                                    <p id="receipt-method" class="mt-1 font-bold italic"></p>
+                                </div>
+                                <div class="text-center mt-8 text-[10px]">
+                                    <p>¡GRACIAS POR SU COMPRA!</p>
+                                    <p>Software desarrollado por PIK'TA SOFT</p>
+                                </div>
+                            </div>
+                            <button onclick="closeReceipt()" class="mt-6 w-full bg-slate-900 text-white py-3 rounded-lg font-bold">CERRAR FACTURA</button>
+                        </div>
+                    </div>
+
+                    <!-- PANTALLA DE LOGIN -->
+                    <div id="login-screen" class="min-h-screen flex items-center justify-center p-6">
+                        <div class="bg-panel p-8 md:p-12 rounded-3xl border border-panel w-full max-w-md shadow-2xl">
+                            <div class="text-center mb-10">
+                                <span class="text-6xl mb-4 block">🚀</span>
+                                <h1 class="text-3xl font-black tracking-tight mb-2">PIK'TA SOFT</h1>
+                                <p class="text-slate-400 font-bold uppercase tracking-tighter text-sm">Panel de Acceso Remoto</p>
+                            </div>
+                            <div class="space-y-6">
+                                <div>
+                                    <label class="block text-sm font-bold text-slate-400 mb-2">USUARIO</label>
+                                    <input type="text" id="login-user" class="input-field" placeholder="Tu usuario...">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-bold text-slate-400 mb-2">CONTRASEÑA</label>
+                                    <input type="password" id="login-pass" class="input-field" placeholder="••••••••">
+                                </div>
+                                <button onclick="handleLogin()" id="login-btn" class="btn-primary">ENTRAR AL SISTEMA</button>
+                                <p id="login-error" class="text-red-400 text-center text-sm font-bold hide">Credenciales incorrectas</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- PANTALLA PRINCIPAL -->
+                    <div id="main-screen" class="min-h-screen hide">
+                        <header class="bg-panel border-b border-panel px-6 py-4 flex justify-between items-center sticky top-0 z-50">
+                            <div class="flex items-center gap-3">
+                                <span class="text-2xl">🚀</span>
+                                <h2 class="font-black text-xl tracking-tighter">PIK'TA SOFT</h2>
+                            </div>
+                            <div class="flex items-center gap-4">
+                                <div class="hidden md:block text-right">
+                                    <p id="user-display" class="font-bold text-sm">Usuario</p>
+                                    <p id="role-display" class="text-xs text-slate-400 uppercase tracking-widest">Rol</p>
+                                </div>
+                                <button onclick="handleLogout()" class="bg-red-500/10 text-red-500 p-2 rounded-xl hover:bg-red-500 hover:text-white transition-all">
+                                    🚪
+                                </button>
+                            </div>
+                        </header>
+
+                        <div class="p-6 md:p-10 max-w-7xl mx-auto">
+                            <!-- Módulos de Navegación -->
+                            <div id="nav-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                <!-- Los módulos se cargan dinámicamente -->
+                            </div>
+
+                            <!-- Área de Contenido de Módulo -->
+                            <div id="module-container" class="mt-8 hide">
+                                <button onclick="backToDashboard()" class="text-slate-400 font-bold mb-6 hover:text-white flex items-center gap-2">
+                                    ← VOLVER AL INICIO
+                                </button>
+                                <div id="module-content" class="bg-panel border border-panel rounded-3xl p-6 min-h-[60vh]">
+                                    <!-- Contenido dinámico -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <script>
+                        let currentUser = null;
+                        const API_BASE = window.location.origin + '/api';
+
+                        // 🔐 GESTIÓN DE LOGIN
+                        async function handleLogin() {{
+                            const user = document.getElementById('login-user').value;
+                            const pass = document.getElementById('login-pass').value;
+                            const btn = document.getElementById('login-btn');
+                            const error = document.getElementById('login-error');
+
+                            if(!user || !pass) return;
+
+                            btn.innerText = "VERIFICANDO...";
+                            btn.disabled = true;
+                            error.classList.add('hide');
+
+                            try {{
+                                console.log("Intentando login en:", API_BASE + '/login');
+                                const resp = await fetch(API_BASE + '/login', {{
+                                    method: 'POST',
+                                    headers: {{ 'Content-Type': 'application/json' }},
+                                    body: JSON.stringify({{ username: user, password: pass }})
+                                }});
+                                
+                                if (!resp.ok) throw new Error("Error en respuesta del servidor: " + resp.status);
+                                
+                                const result = await resp.json();
+
+                                if(result.status === 'success') {{
+                                    currentUser = result.data;
+                                    localStorage.setItem('pikta_user', JSON.stringify(currentUser));
+                                    startSystem();
+                                }} else {{
+                                    error.classList.remove('hide');
+                                }}
+                            }} catch(e) {{
+                                console.error("Error detallado:", e);
+                                alert("Error de conexión con el servidor: " + e.message);
+                            }} finally {{
+                                btn.innerText = "ENTRAR AL SISTEMA";
+                                btn.disabled = false;
+                            }}
+                        }}
+
+                        function handleLogout() {{
+                            localStorage.removeItem('pikta_user');
+                            location.reload();
+                        }}
+
+                        // 🏠 INICIO DEL SISTEMA
+                        function startSystem() {{
+                            document.getElementById('login-screen').classList.add('hide');
+                            document.getElementById('main-screen').classList.remove('hide');
+                            document.getElementById('user-display').innerText = currentUser.username.toUpperCase();
+                            document.getElementById('role-display').innerText = currentUser.rol;
+                            renderNavCards();
+                        }}
+
+                        function renderNavCards() {{
+                            const grid = document.getElementById('nav-grid');
+                            grid.innerHTML = '';
+                            const rol = currentUser.rol;
+
+                            const modules = [
+                                {{ id: 'dashboard', title: 'Dashboard', icon: '📊', desc: 'Ventas y alertas', roles: ['Administrador', 'Supervisor'] }},
+                                {{ id: 'pos', title: 'Caja / Pagos', icon: '🛒', desc: 'Cobro de facturas', roles: ['Administrador', 'Supervisor', 'Cajera'] }},
+                                {{ id: 'waiter', title: 'Tomar Pedidos', icon: '📝', desc: 'Meseros y mesas', roles: ['Administrador', 'Supervisor', 'Mesero'] }},
+                                {{ id: 'kds', title: 'Cocina (KDS)', icon: '👨‍🍳', desc: 'Cola de preparación', roles: ['Administrador', 'Supervisor', 'Cocina'] }},
+                                {{ id: 'admin_menu', title: 'Gestión Menú', icon: '🍔', desc: 'Editar productos', roles: ['Administrador', 'Supervisor'] }},
+                                {{ id: 'inventory', title: 'Inventario', icon: '📦', desc: 'Stock e insumos', roles: ['Administrador', 'Supervisor'] }},
+                                {{ id: 'users', title: 'Usuarios', icon: '👤', desc: 'Personal y sesiones', roles: ['Administrador', 'Supervisor'] }},
+                                {{ id: 'tv', title: 'Pantalla TV', icon: '📺', desc: 'Vista clientes', roles: ['Todos'] }}
+                            ];
+
+                            modules.forEach(m => {{
+                                if(m.roles.includes('Todos') || m.roles.includes(rol)) {{
+                                    const card = document.createElement('div');
+                                    card.className = 'module-card';
+                                    card.onclick = () => openModule(m.id);
+                                    card.innerHTML = `
+                                        <div class="text-4xl mb-4 text-emerald-400">${{m.icon}}</div>
+                                        <h3 class="font-bold text-xl mb-2">${{m.title}}</h3>
+                                        <p class="text-slate-400 text-sm font-medium leading-relaxed">${{m.desc}}</p>
+                                    `;
+                                    grid.appendChild(card);
+                                }}
+                            }});
+                        }}
+
+                        function openModule(id) {{
+                            document.getElementById('nav-grid').classList.add('hide');
+                            document.getElementById('module-container').classList.remove('hide');
+                            const content = document.getElementById('module-content');
+                            
+                            if(id === 'dashboard') loadDashboardModule(content);
+                            else if(id === 'inventory') loadInventoryModule(content);
+                            else if(id === 'users') loadUsersModule(content);
+                            else if(id === 'pos') loadPOSModule(content);
+                            else if(id === 'waiter') loadWaiterModule(content);
+                            else if(id === 'kds') loadKDSModule(content);
+                            else if(id === 'tv') loadTVModule(content);
+                            else if(id === 'admin_menu') loadAdminMenuModule(content);
+                        }}
+
+                        function backToDashboard() {{
+                            document.getElementById('nav-grid').classList.remove('hide');
+                            document.getElementById('module-container').classList.add('hide');
+                        }}
+
+                        // 🍔 MÓDULO GESTIÓN MENÚ (ADMIN)
+                        async function loadAdminMenuModule(container) {{
+                            container.innerHTML = `
+                                <div class="space-y-6">
+                                    <div class="flex justify-between items-center">
+                                        <h2 class="text-2xl font-black text-blue-400">🍔 GESTIÓN DEL MENÚ</h2>
+                                        <button onclick="editProductPrompt()" class="btn-primary w-auto px-6">+ NUEVO PRODUCTO</button>
+                                    </div>
+                                    <div id="admin-menu-list" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+                                </div>
+                            `;
+                            const resp = await fetch(API_BASE + '/menu');
+                            const data = await resp.json();
+                            const list = document.getElementById('admin-menu-list');
+                            data.data.forEach(p => {{
+                                list.innerHTML += `
+                                    <div class="bg-slate-800 p-4 rounded-2xl border border-panel flex justify-between items-center">
+                                        <div>
+                                            <p class="font-bold">${{p.nombre}}</p>
+                                            <p class="text-blue-400 text-sm font-black">$${{p.precio.toFixed(2)}}</p>
+                                            <p class="text-slate-500 text-xs">${{p.categoria}}</p>
+                                        </div>
+                                        <div class="flex gap-2">
+                                            <button onclick='editProductPrompt(${{JSON.stringify(p)}})' class="p-2 bg-blue-500/10 text-blue-400 rounded-lg hover:bg-blue-500 hover:text-white transition-all">✏️</button>
+                                            <button onclick="deleteProduct(${{p.id}})" class="p-2 bg-red-500/10 text-red-400 rounded-lg hover:bg-red-500 hover:text-white transition-all">🗑️</button>
+                                        </div>
+                                    </div>
+                                `;
+                            }});
+
+                            window.editProductPrompt = async (p = null) => {{
+                                const nom = prompt("Nombre del producto:", p ? p.nombre : "");
+                                if(!nom) return;
+                                const pre = prompt("Precio:", p ? p.precio : "");
+                                if(!pre) return;
+                                const cat = prompt("Categoría:", p ? p.categoria : "Comida");
+                                
+                                await fetch(API_BASE + '/menu/save', {{
+                                    method: 'POST',
+                                    headers: {{ 'Content-Type': 'application/json' }},
+                                    body: JSON.stringify({{ id: p ? p.id : null, nombre: nom, precio: parseFloat(pre), categoria: cat }})
+                                }});
+                                loadAdminMenuModule(container);
+                            }};
+
+                            window.deleteProduct = async (id) => {{
+                                if(!confirm("¿Eliminar este producto?")) return;
+                                await fetch(API_BASE + '/menu/delete', {{
+                                    method: 'POST',
+                                    headers: {{ 'Content-Type': 'application/json' }},
+                                    body: JSON.stringify({{ id: id }})
+                                }});
+                                loadAdminMenuModule(container);
+                            }};
+                        }}
+
+                        // 📊 MÓDULO DASHBOARD (ADMIN)
+                        async function loadDashboardModule(container) {{
+                            container.innerHTML = `
+                                <div class="space-y-8">
+                                    <h2 class="text-2xl font-black text-blue-400 italic">📊 DASHBOARD MAESTRO</h2>
+                                    <div id="dashboard-stats" class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                        <div class="stat-card p-6 rounded-3xl">
+                                            <p class="text-slate-400 font-bold text-sm mb-2">VENTAS HOY</p>
+                                            <p id="stat-sales" class="text-4xl font-black text-emerald-400">$0.00</p>
+                                        </div>
+                                        <div class="stat-card p-6 rounded-3xl">
+                                            <p class="text-slate-400 font-bold text-sm mb-2">PEDIDOS TOTALES</p>
+                                            <p id="stat-orders" class="text-4xl font-black text-blue-400">0</p>
+                                        </div>
+                                        <div class="stat-card p-6 rounded-3xl">
+                                            <p class="text-slate-400 font-bold text-sm mb-2">ESTADO CAJA</p>
+                                            <p id="stat-caja" class="text-xl font-black text-emerald-400 tracking-tight">ABIERTA</p>
+                                        </div>
+                                    </div>
+                                    <div class="bg-slate-900/40 p-6 rounded-3xl border border-panel">
+                                        <h3 class="font-bold mb-6 text-slate-300">ESTADO DE INVENTARIO</h3>
+                                        <div id="inventory-bars" class="space-y-6"></div>
+                                    </div>
+                                </div>
+                            `;
+                            const resp = await fetch(API_BASE + '/stats');
+                            const data = await resp.json();
+                            if(data.status === 'success') {{
+                                document.getElementById('stat-sales').innerText = '$' + data.ventas.toFixed(2);
+                                document.getElementById('stat-orders').innerText = data.pedidos;
+                                document.getElementById('stat-caja').innerText = data.caja ? 'ABIERTA' : 'CERRADA';
+                                
+                                const bars = document.getElementById('inventory-bars');
+                                data.stock.forEach(i => {{
+                                    const pct = i.pct > 100 ? 100 : i.pct;
+                                    const color = pct < 20 ? 'bg-red-500' : (pct < 50 ? 'bg-yellow-500' : 'bg-emerald-500');
+                                    bars.innerHTML += `
+                                        <div class="space-y-2">
+                                            <div class="flex justify-between text-sm font-bold">
+                                                <span>${{i.nombre}}</span>
+                                                <span class="text-slate-400">${{i.pct}}%</span>
+                                            </div>
+                                            <div class="w-full bg-slate-800 rounded-full h-3">
+                                                <div class="${{color}} h-3 rounded-full transition-all duration-500" style="width: ${{pct}}%"></div>
+                                            </div>
+                                        </div>
+                                    `;
+                                }});
+                            }}
+                        }}
+
+                        // 📦 MÓDULO INVENTARIO
+                        async function loadInventoryModule(container) {{
+                            container.innerHTML = `
+                                <div class="space-y-6">
+                                    <div class="flex justify-between items-center">
+                                        <h2 class="text-2xl font-black text-emerald-400 uppercase tracking-tighter italic">📦 INVENTARIO Y STOCK</h2>
+                                        <button onclick="editInventoryPrompt()" class="bg-emerald-500 hover:bg-emerald-600 text-white font-bold px-6 py-2 rounded-xl text-sm transition-all shadow-lg shadow-emerald-500/20">+ NUEVO INSUMO</button>
+                                    </div>
+                                    <div class="overflow-x-auto bg-slate-900/40 rounded-3xl p-4">
+                                        <table class="w-full text-left">
+                                            <thead class="text-slate-500 border-b border-slate-700">
+                                                <tr>
+                                                    <th class="py-4 px-2">ID</th>
+                                                    <th class="py-4">INGREDIENTE</th>
+                                                    <th class="py-4">STOCK ACTUAL</th>
+                                                    <th class="py-4">MÍNIMO</th>
+                                                    <th class="py-4">ESTADO</th>
+                                                    <th class="py-4 text-right">ACCIONES</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody id="inventory-list"></tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            `;
+                            const resp = await fetch(API_BASE + '/inventory');
+                            const data = await resp.json();
+                            const list = document.getElementById('inventory-list');
+                            data.data.forEach(i => {{
+                                const color = i.status === 'OK' ? 'text-emerald-400' : (i.status === 'BAJO' ? 'text-yellow-400' : 'text-red-400');
+                                list.innerHTML += `
+                                    <tr class="border-b border-slate-800 hover:bg-slate-800/50 transition-colors">
+                                        <td class="py-4 px-2 text-slate-500 font-mono text-xs">${{i.id}}</td>
+                                        <td class="py-4 font-bold text-white">${{i.nombre}}</td>
+                                        <td class="py-4 text-slate-300">${{i.cantidad}} ${{i.unidad}}</td>
+                                        <td class="py-4 text-slate-500 text-xs">${{i.stock_minimo || 0}}</td>
+                                        <td class="py-4 font-black ${{color}} text-xs">${{i.status}}</td>
+                                        <td class="py-4 text-right">
+                                            <button onclick='editInventoryPrompt(${{JSON.stringify(i)}})' class="text-blue-400 hover:text-white mr-4">✏️</button>
+                                            <button onclick="deleteInventory(${{i.id}})" class="text-red-400 hover:text-white">🗑️</button>
+                                        </td>
+                                    </tr>
+                                `;
+                            }});
+
+                            window.editInventoryPrompt = async (i = null) => {{
+                                const nom = prompt("Nombre del insumo:", i ? i.nombre : "");
+                                if(!nom) return;
+                                const cant = prompt("Cantidad actual:", i ? i.cantidad : "0");
+                                const uni = prompt("Unidad (Kg, Unid, Litro):", i ? i.unidad : "Unid");
+                                const min = prompt("Stock mínimo:", i ? i.stock_minimo : "10");
+                                
+                                await fetch(API_BASE + '/inventory/save', {{
+                                    method: 'POST',
+                                    headers: {{ 'Content-Type': 'application/json' }},
+                                    body: JSON.stringify({{ id: i ? i.id : null, nombre: nom, cantidad: parseFloat(cant), unidad: uni, stock_minimo: parseFloat(min) }})
+                                }});
+                                loadInventoryModule(container);
+                            }};
+
+                            window.deleteInventory = async (id) => {{
+                                if(!confirm("¿Eliminar este insumo del inventario?")) return;
+                                await fetch(API_BASE + '/inventory/delete', {{
+                                    method: 'POST',
+                                    headers: {{ 'Content-Type': 'application/json' }},
+                                    body: JSON.stringify({{ id: id }})
+                                }});
+                                loadInventoryModule(container);
+                            }};
+                        }}
+
+                        // 👤 MÓDULO USUARIOS Y CIERRES
+                        async function loadUsersModule(container) {{
+                            container.innerHTML = `
+                                <div class="space-y-10">
+                                    <div>
+                                        <div class="flex justify-between items-center mb-6">
+                                            <h2 class="text-2xl font-black text-blue-400 uppercase tracking-tighter italic">👤 GESTIÓN DE USUARIOS</h2>
+                                            <button onclick="editUserPrompt()" class="btn-primary w-auto px-6">+ NUEVO USUARIO</button>
+                                        </div>
+                                        <div class="overflow-x-auto bg-slate-900/40 rounded-3xl p-4">
+                                            <table class="w-full text-left">
+                                                <thead class="text-slate-500 border-b border-slate-700">
+                                                    <tr><th class="py-4 px-2">USUARIO</th><th class="py-4">ROL</th><th class="py-4">NOMBRE COMPLETO</th><th class="py-4 text-right">ACCIONES</th></tr>
+                                                </thead>
+                                                <tbody id="users-list"></tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <div class="flex justify-between items-center mb-6">
+                                            <h2 class="text-2xl font-black text-emerald-400 uppercase tracking-tighter italic">🔒 HISTORIAL DE CIERRES</h2>
+                                            <button onclick="realizarCierre()" class="bg-red-500 hover:bg-red-600 text-white font-black px-6 py-2 rounded-xl text-sm transition-all shadow-lg shadow-red-500/20">CERRAR CAJA AHORA</button>
+                                        </div>
+                                        <div class="overflow-x-auto bg-slate-900/40 rounded-3xl p-4">
+                                            <table class="w-full text-left">
+                                                <thead class="text-slate-500 border-b border-slate-700">
+                                                    <tr><th class="py-4 px-2">FECHA</th><th class="py-4">USUARIO</th><th class="py-4">MONTO FINAL</th></tr>
+                                                </thead>
+                                                <tbody id="cierres-list"></tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+                            `;
+                            const resp = await fetch(API_BASE + '/users');
+                            const data = await resp.json();
+                            const uList = document.getElementById('users-list');
+                            data.usuarios.forEach(u => {{
+                                uList.innerHTML += `
+                                    <tr class="border-b border-slate-800">
+                                        <td class="py-4 px-2 font-bold">${{u.username}}</td>
+                                        <td class="py-4 text-blue-400 font-bold">${{u.rol}}</td>
+                                        <td class="py-4 text-slate-300">${{u.nombre}}</td>
+                                        <td class="py-4 text-right">
+                                            <button onclick='editUserPrompt(${{JSON.stringify(u)}})' class="text-blue-400 hover:text-white mr-4">✏️</button>
+                                            <button onclick="deleteUser(${{u.id}})" class="text-red-400 hover:text-white">🗑️</button>
+                                        </td>
+                                    </tr>`;
+                            }});
+                            
+                            window.editUserPrompt = async (u = null) => {{
+                                const user = prompt("Nombre de usuario:", u ? u.username : "");
+                                if(!user) return;
+                                const pass = prompt("Contraseña (dejar vacío para no cambiar):", "");
+                                if(!u && !pass) return alert("Contraseña requerida para nuevo usuario");
+                                const rol = prompt("Rol (Administrador, Supervisor, Mesero, Cocina, Cajera):", u ? u.rol : "Mesero");
+                                const nom = prompt("Nombre completo:", u ? u.nombre : "");
+                                
+                                await fetch(API_BASE + '/users/save', {{
+                                    method: 'POST',
+                                    headers: {{ 'Content-Type': 'application/json' }},
+                                    body: JSON.stringify({{ id: u ? u.id : null, username: user, password: pass, rol: rol, nombre: nom }})
+                                }});
+                                loadUsersModule(container);
+                            }};
+
+                            window.deleteUser = async (id) => {{
+                                if(!confirm("¿Eliminar este usuario?")) return;
+                                await fetch(API_BASE + '/users/delete', {{
+                                    method: 'POST',
+                                    headers: {{ 'Content-Type': 'application/json' }},
+                                    body: JSON.stringify({{ id: id }})
+                                }});
+                                loadUsersModule(container);
+                            }};
+
+                            window.realizarCierre = async () => {{
+                                if(!confirm("¿Estás seguro de que deseas realizar el cierre de caja ahora?")) return;
+                                const resp = await fetch(API_BASE + '/caja/cierre', {{
+                                    method: 'POST',
+                                    headers: {{ 'Content-Type': 'application/json' }},
+                                    body: JSON.stringify({{ usuario_id: currentUser.id }})
+                                }});
+                                const res = await resp.json();
+                                if(res.status === 'success') {{
+                                    alert("✅ Cierre realizado: Total en caja $" + res.total.toFixed(2));
+                                    loadUsersModule(container);
+                                }} else {{
+                                    alert("❌ Error: " + res.message);
+                                }}
+                            }};
+
+                            const cList = document.getElementById('cierres-list');
+                            data.cierres.forEach(c => {{
+                                cList.innerHTML += `<tr class="border-b border-slate-800"><td class="py-4 px-2 font-bold text-slate-400">${{c.fecha}}</td><td class="py-4 font-bold">${{c.usuario}}</td><td class="py-4 text-emerald-400 font-black">$${{c.total.toFixed(2)}}</td></tr>`;
+                            }});
+                        }}
+
+                        // 🛒 MÓDULO POS (Completo)
+                        async function loadPOSModule(container) {{
+                            container.innerHTML = `
+                                <div class="grid grid-cols-1 lg:grid-cols-2 gap-10">
+                                    <div>
+                                        <h2 class="text-2xl font-black mb-6 text-emerald-400 uppercase tracking-tighter">🛒 FACTURAS PENDIENTES</h2>
+                                        <div id="pos-pending-list" class="space-y-4 max-h-[70vh] overflow-y-auto pr-2"></div>
+                                    </div>
+                                    <div id="pos-checkout-area" class="bg-slate-900/50 p-8 rounded-[40px] border-2 border-slate-700 shadow-2xl sticky top-24 h-fit">
+                                        <p class="text-center text-slate-500 py-10 font-bold">Selecciona una factura para cobrar</p>
+                                    </div>
+                                </div>
+                            `;
+                            const resp = await fetch(API_BASE + '/pedidos');
+                            const data = await resp.json();
+                            const list = document.getElementById('pos-pending-list');
+                            data.data.forEach(p => {{
+                                const card = document.createElement('div');
+                                card.className = 'bg-slate-800 p-6 rounded-3xl border border-panel cursor-pointer hover:border-emerald-500/50 transition-all group';
+                                card.onclick = (e) => {{
+                                    if(e.target.tagName !== 'BUTTON') renderCheckout(p);
+                                }};
+                                card.innerHTML = `
+                                    <div class="flex justify-between items-center">
+                                        <div class="flex-grow">
+                                            <p class="text-emerald-400 font-black text-xl mb-1">${{p.mesa}}</p>
+                                            <div class="flex gap-3 items-center">
+                                                <p class="text-slate-500 font-bold text-[10px] uppercase tracking-widest">${{p.numero}}</p>
+                                                <span class="bg-blue-500/20 text-blue-400 text-[10px] font-black px-2 py-0.5 rounded-full">${{p.estado}}</span>
+                                            </div>
+                                        </div>
+                                        <div class="text-right flex items-center gap-4">
+                                            <div class="text-2xl font-black text-white">$${{p.total.toFixed(2)}}</div>
+                                            <button onclick="editFromPOS('${{p.mesa}}')" class="p-3 bg-blue-500/10 text-blue-400 rounded-xl hover:bg-blue-500 hover:text-white transition-all opacity-0 group-hover:opacity-100">✏️</button>
+                                        </div>
+                                    </div>
+                                `;
+                                list.appendChild(card);
+                            }});
+
+                            window.editFromPOS = (mesa) => {{
+                                openModule('waiter');
+                                setTimeout(() => openTableOrder(mesa), 100);
+                            }};
+
+                            window.renderCheckout = (order) => {{
+                                const area = document.getElementById('pos-checkout-area');
+                                area.innerHTML = `
+                                    <div class="text-center mb-8">
+                                        <h3 class="text-3xl font-black text-blue-400 tracking-tighter uppercase">${{order.mesa}}</h3>
+                                        <p class="text-slate-500 text-xs font-bold">${{order.numero}}</p>
+                                    </div>
+                                    <div class="space-y-6">
+                                        <div class="bg-slate-800/80 p-8 rounded-3xl border border-panel text-center">
+                                            <p class="text-slate-500 text-xs font-black uppercase tracking-widest mb-2">TOTAL NETO A PAGAR</p>
+                                            <p class="text-6xl font-black text-emerald-400 tracking-tighter">$${{order.total.toFixed(2)}}</p>
+                                        </div>
+                                        <div class="grid grid-cols-3 gap-3">
+                                            <button onclick="selectMethod('EFECTIVO')" id="btn-efectivo" class="pay-btn bg-slate-700 p-5 rounded-2xl font-black text-xs hover:bg-blue-500 transition-all">EFECTIVO</button>
+                                            <button onclick="selectMethod('VISA')" id="btn-visa" class="pay-btn bg-slate-700 p-5 rounded-2xl font-black text-xs hover:bg-blue-500 transition-all">VISA/MAST</button>
+                                            <button onclick="selectMethod('YAPPY')" id="btn-yappy" class="pay-btn bg-slate-700 p-5 rounded-2xl font-black text-xs hover:bg-blue-500 transition-all">YAPPY</button>
+                                        </div>
+                                        <button onclick="processPayment(${{order.id}})" class="btn-success text-lg py-5 shadow-xl shadow-emerald-500/20 uppercase tracking-widest">✅ COMPLETAR PAGO</button>
+                                    </div>
+                                `;
+                                window.currentMethod = 'EFECTIVO';
+                                window.selectMethod = (m) => {{
+                                    window.currentMethod = m;
+                                    document.querySelectorAll('.pay-btn').forEach(b => b.classList.remove('bg-blue-500'));
+                                    document.getElementById('btn-' + m.toLowerCase()).classList.add('bg-blue-500');
+                                }};
+                                selectMethod('EFECTIVO');
+                            }};
+
+                            window.processPayment = async (id) => {{
+                                if(!confirm("¿Confirmar el pago de esta factura?")) return;
+                                const resp = await fetch(API_BASE + '/cobrar', {{
+                                    method: 'POST',
+                                    headers: {{ 'Content-Type': 'application/json' }},
+                                    body: JSON.stringify({{ id: id, metodo: window.currentMethod }})
+                                }});
+                                const res = await resp.json();
+                                if(res.status === 'success') {{
+                                    showReceiptModal(id);
+                                    loadPOSModule(container);
+                                }} else {{
+                                    alert("❌ Error: " + res.message);
+                                }}
+                            }};
+
+                            window.showReceiptModal = async (orderId) => {{
+                                try {{
+                                    const resp = await fetch(API_BASE + `/pedidos/detalles?id=${{orderId}}`);
+                                    const data = await resp.json();
+                                    if(data.status === 'success') {{
+                                        document.getElementById('receipt-modal').classList.remove('hide');
+                                        document.getElementById('receipt-date').innerText = new Date().toLocaleString();
+                                        document.getElementById('receipt-header-info').innerHTML = `MESA: ${{data.mesa}}<br>REF: ${{data.numero}}`;
+                                        
+                                        const itemsEl = document.getElementById('receipt-items');
+                                        itemsEl.innerHTML = '';
+                                        data.items.forEach(i => {{
+                                            itemsEl.innerHTML += `
+                                                <div class="flex justify-between">
+                                                    <span>${{i.cantidad}} x ${{i.nombre}}</span>
+                                                    <span>$${{i.subtotal.toFixed(2)}}</span>
+                                                </div>
+                                            `;
+                                        }});
+                                        
+                                        document.getElementById('receipt-total').innerText = '$' + data.total.toFixed(2);
+                                        document.getElementById('receipt-method').innerText = 'PAGADO CON: ' + window.currentMethod;
+                                    }}
+                                }} catch(e) {{
+                                    console.error("Error al cargar recibo", e);
+                                }}
+                            }};
+
+                            window.closeReceipt = () => {{
+                                document.getElementById('receipt-modal').classList.add('hide');
+                            }};
+                        }}
+
+                        // 👨‍🍳 MÓDULO KDS
+                        async function loadKDSModule(container) {{
+                            container.innerHTML = `
+                                <div class="space-y-8">
+                                    <h2 class="text-3xl font-black text-blue-400 italic">👨‍🍳 COLA DE PREPARACIÓN</h2>
+                                    <div id="kds-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"></div>
+                                </div>
+                            `;
+                            const grid = document.getElementById('kds-grid');
+                            const update = async () => {{
+                                const resp = await fetch(API_BASE + '/pedidos');
+                                const data = await resp.json();
+                                grid.innerHTML = '';
+                                const orders = data.data.filter(p => p.estado !== 'ENTREGADO');
+                                orders.forEach(o => {{
+                                    grid.innerHTML += `
+                                        <div class="bg-slate-800 border-2 border-slate-700 p-6 rounded-3xl shadow-xl">
+                                            <div class="flex justify-between items-center mb-4">
+                                                <h4 class="text-xl font-black text-white uppercase">${{o.mesa}}</h4>
+                                                <span class="text-xs font-bold text-slate-500">${{o.numero.split('-').pop()}}</span>
+                                            </div>
+                                            <div class="bg-blue-500/10 text-blue-400 font-bold py-2 rounded-xl text-center text-sm mb-6">${{o.estado}}</div>
+                                            <button onclick="updateOrderStatus(${{o.id}}, '${{o.estado}}')" class="w-full bg-slate-700 hover:bg-blue-600 text-white font-black py-3 rounded-2xl transition-all">
+                                                AVANZAR ESTADO →
+                                            </button>
+                                        </div>
+                                    `;
+                                }});
+                            }};
+                            
+                            window.updateOrderStatus = async (id, current) => {{
+                                let next = 'EN_PREPARACION';
+                                if(current === 'PENDIENTE_PAGO' || current === 'RECIBIDO') next = 'EN_PREPARACION';
+                                else if(current === 'EN_PREPARACION') next = 'LISTO';
+                                else if(current === 'LISTO') next = 'ENTREGADO';
+                                
+                                await fetch(API_BASE + '/pedidos/status', {{
+                                    method: 'POST',
+                                    headers: {{ 'Content-Type': 'application/json' }},
+                                    body: JSON.stringify({{ id: id, estado: next }})
+                                }});
+                                update();
+                            }};
+                            update();
+                        }}
+
+                        // 📺 MÓDULO TV
+                        async function loadTVModule(container) {{
+                            container.innerHTML = '<h2 class="text-3xl font-black text-center mb-10 text-emerald-400 italic tracking-tighter">¡PEDIDOS LISTOS!</h2><div id="tv-list" class="grid grid-cols-2 md:grid-cols-4 gap-6"></div>';
+                            const list = document.getElementById('tv-list');
+                            const update = async () => {{
+                                const resp = await fetch(API_BASE + '/tv/listo');
+                                const data = await resp.json();
+                                list.innerHTML = '';
+                                if(data.data && data.data.length > 0) {{
+                                    data.data.forEach(p => {{
+                                        list.innerHTML += `
+                                            <div class="bg-emerald-500/10 border-4 border-emerald-500 p-10 rounded-[40px] text-center animate-pulse">
+                                                <div class="text-5xl font-black text-emerald-400 mb-2">${{p.numero.split('-').pop()}}</div>
+                                                <div class="text-emerald-500 font-bold uppercase tracking-widest text-sm">${{p.mesa}}</div>
+                                            </div>
+                                        `;
+                                    }});
+                                }} else {{
+                                    list.innerHTML = '<p class="col-span-full text-center text-slate-500 py-20 font-bold">Esperando pedidos...</p>';
+                                }}
+                            }};
+                            update();
+                            const timer = setInterval(() => {{ if(document.getElementById('tv-list')) update(); else clearInterval(timer); }}, 10000);
+                        }}
+
+                        // 📝 MÓDULO MESERO CON MAPA DE MESAS
+                        async function loadWaiterModule(container) {{
+                            container.innerHTML = `
+                                <div class="space-y-8">
+                                    <h2 class="text-2xl font-black text-emerald-400 uppercase tracking-tighter italic">📍 MAPA DE MESAS</h2>
+                                    <div id="web-table-map" class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 mb-10"></div>
+                                    <div id="waiter-order-section" class="hide animate-in fade-in duration-300">
+                                        <div class="flex justify-between items-center mb-6">
+                                            <h3 id="selected-table-name" class="text-3xl font-black text-blue-400 tracking-tighter"></h3>
+                                            <button onclick="backToMap()" class="text-slate-500 font-bold hover:text-white flex items-center gap-2">✕ CERRAR</button>
+                                        </div>
+                                        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                                            <div class="lg:col-span-2">
+                                                <div id="web-menu-grid" class="grid grid-cols-2 md:grid-cols-3 gap-4 overflow-y-auto max-h-[60vh] pr-2"></div>
+                                            </div>
+                                            <div class="bg-slate-900/50 p-6 rounded-[32px] border border-panel flex flex-col shadow-2xl">
+                                                <h3 class="font-bold mb-4 text-blue-400 uppercase text-xs tracking-widest">ORDEN ACTUAL</h3>
+                                                <div id="web-cart" class="flex-grow overflow-y-auto space-y-3 mb-6 min-h-[200px]"></div>
+                                                <div class="border-t border-slate-700 pt-6 mt-auto">
+                                                    <div class="flex justify-between font-black text-3xl mb-6">
+                                                        <span class="text-slate-500 text-sm self-center">TOTAL</span>
+                                                        <span id="web-total" class="text-emerald-400 tracking-tighter">$0.00</span>
+                                                    </div>
+                                                    <button onclick="sendWebOrder()" class="btn-primary py-4 text-lg shadow-xl shadow-blue-500/20">🚀 ENVIAR A COCINA</button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            `;
+                            
+                            let cart = [];
+                            let selectedMesa = "";
+
+                            window.backToMap = () => {{
+                                document.getElementById('web-table-map').classList.remove('hide');
+                                document.getElementById('waiter-order-section').classList.add('hide');
+                                renderTableMap();
+                            }};
+
+                            const renderTableMap = async () => {{
+                                const map = document.getElementById('web-table-map');
+                                const resp = await fetch(API_BASE + '/tables');
+                                const data = await resp.json();
+                                map.innerHTML = '';
+                                
+                                const mesas = ["Mesa 1", "Mesa 2", "Mesa 3", "Mesa 4", "Mesa 5", "Mesa 6", "Mesa 7", "Mesa 8", "Mesa 9", "Mesa 10", "Mesa 11", "Mesa 12", "Para Llevar"];
+                                mesas.forEach(m => {{
+                                    const isOccupied = data.occupied[m];
+                                    const btn = document.createElement('button');
+                                    btn.className = `p-8 rounded-3xl font-black text-xl transition-all border-4 shadow-lg ${{isOccupied ? 'bg-red-500/10 border-red-500 text-red-500' : 'bg-emerald-500/10 border-emerald-500 text-emerald-500 hover:bg-emerald-500 hover:text-white hover:scale-105'}}`;
+                                    btn.innerText = m;
+                                    btn.onclick = () => openTableOrder(m);
+                                    map.appendChild(btn);
+                                }});
+                            }};
+
+                            window.openTableOrder = async (m) => {{
+                                selectedMesa = m;
+                                document.getElementById('web-table-map').classList.add('hide');
+                                document.getElementById('waiter-order-section').classList.remove('hide');
+                                document.getElementById('selected-table-name').innerText = m;
+                                cart = [];
+                                
+                                try {{
+                                    const resp = await fetch(API_BASE + `/pedidos/detalles?mesa=${{encodeURIComponent(m)}}`);
+                                    const data = await resp.json();
+                                    if(data.status === 'success') {{
+                                        cart = data.items;
+                                        // Marcar items existentes para diferenciar de los nuevos (opcional)
+                                        cart.forEach(i => i.isExisting = true);
+                                    }}
+                                }} catch(e) {{
+                                    console.log("Mesa libre o error al cargar");
+                                }}
+                                
+                                updateCart();
+                                loadMenu();
+                            }};
+
+                            const loadMenu = async () => {{
+                                const resp = await fetch(API_BASE + '/menu');
+                                const data = await resp.json();
+                                const grid = document.getElementById('web-menu-grid');
+                                grid.innerHTML = '';
+                                data.data.forEach(p => {{
+                                    const btn = document.createElement('div');
+                                    btn.className = 'bg-slate-800 p-5 rounded-2xl cursor-pointer hover:bg-slate-700 transition-all border border-panel hover:border-blue-500/50 group';
+                                    btn.onclick = () => addToCart(p);
+                                    btn.innerHTML = `
+                                        <div class="flex justify-between items-start mb-2">
+                                            <p class="font-bold text-white group-hover:text-blue-400 transition-colors">${{p.nombre}}</p>
+                                            <p class="text-emerald-400 font-black text-sm">$${{p.precio.toFixed(2)}}</p>
+                                        </div>
+                                        <p class="text-slate-500 text-[10px] uppercase tracking-widest font-bold">${{p.categoria}}</p>
+                                    `;
+                                    grid.appendChild(btn);
+                                }});
+                            }};
+
+                            window.addToCart = (p) => {{
+                                const existing = cart.find(i => i.id === p.id);
+                                if(existing) {{ existing.cantidad++; existing.subtotal = existing.cantidad * existing.precio; }}
+                                else {{ cart.push({{ ...p, cantidad: 1, subtotal: p.precio }}); }}
+                                updateCart();
+                            }};
+
+                            window.updateCart = () => {{
+                                const cartEl = document.getElementById('web-cart');
+                                const totalEl = document.getElementById('web-total');
+                                cartEl.innerHTML = '';
+                                let total = 0;
+                                cart.forEach((item, idx) => {{
+                                    total += item.subtotal;
+                                    const isNew = !item.isExisting;
+                                    cartEl.innerHTML += `
+                                        <div class="flex justify-between items-center bg-slate-800/80 p-4 rounded-2xl border ${{isNew ? 'border-blue-500/30' : 'border-panel'}}">
+                                            <div class="flex-grow">
+                                                <div class="flex items-center gap-2">
+                                                    <p class="font-bold text-white text-sm">${{item.nombre}}</p>
+                                                    ${{isNew ? '<span class="text-[8px] bg-blue-500 text-white px-1.5 rounded-full font-black">NUEVO</span>' : ''}}
+                                                </div>
+                                                <p class="text-xs text-slate-500 font-bold">${{item.cantidad}} UNID. x $${{item.precio.toFixed(2)}}</p>
+                                            </div>
+                                            <div class="text-right flex items-center gap-4">
+                                                <p class="font-black text-blue-400 text-sm">$${{item.subtotal.toFixed(2)}}</p>
+                                                <button onclick="removeFromCart(${{idx}})" class="text-red-500/50 hover:text-red-500 transition-colors">✕</button>
+                                            </div>
+                                        </div>
+                                    `;
+                                }});
+                                totalEl.innerText = '$' + total.toFixed(2);
+                            }};
+
+                            window.removeFromCart = (idx) => {{ 
+                                const item = cart[idx];
+                                if(item.isExisting && item.cantidad > 1) {{
+                                    item.cantidad--;
+                                    item.subtotal = item.cantidad * item.precio;
+                                }} else {{
+                                    cart.splice(idx, 1); 
+                                }}
+                                updateCart(); 
+                        }};
+
+                        window.sendWebOrder = async () => {{
+                            if(cart.length === 0) return alert("El pedido está vacío");
+                            
+                            const hasNewItems = cart.some(i => !i.isExisting);
+                            const hasExistingItems = cart.some(i => i.isExisting);
+                            
+                            const orderData = {{
+                                mesa: selectedMesa,
+                                items: cart,
+                                total: cart.reduce((a, b) => a + b.subtotal, 0),
+                                canal: 'WEB',
+                                usuario_id: currentUser.id
+                            }};
+
+                            const btn = event.target;
+                            btn.disabled = true;
+                            btn.innerText = "PROCESANDO...";
+
+                            try {{
+                                const resp = await fetch(API_BASE + '/pedidos/nuevo', {{
+                                    method: 'POST',
+                                    headers: {{ 'Content-Type': 'application/json' }},
+                                    body: JSON.stringify(orderData)
+                                }});
+                                const res = await resp.json();
+                                if(res.status === 'success') {{ 
+                                    alert(hasExistingItems ? "✅ ¡Pedido actualizado correctamente!" : "✅ ¡Pedido enviado a cocina!"); 
+                                    backToMap(); 
+                                }} else {{
+                                    alert("❌ Error: " + res.message);
+                                }}
+                            }} finally {{
+                                btn.disabled = false;
+                                btn.innerText = "🚀 ENVIAR A COCINA";
+                            }}
+                        }};
+
+                        renderTableMap();
+                    }}
+
+                    // 🚀 AUTO-LOGIN
+                    const savedUser = localStorage.getItem('pikta_user');
+                    if(savedUser) {{
+                        currentUser = JSON.parse(savedUser);
+                        startSystem();
+                    }}
+                </script>
+            </body>
+            </html>
+            """
+            self.wfile.write(html_content.encode('utf-8'))
+            return
+
+        except Exception as e:
+            logging.error(f"Error en do_GET: {e}")
+            self._set_headers(500)
+            self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode())
+            return
+
+        response = {"status": "error", "message": "Endpoint no encontrado"}
+        
+        if self.path == "/api/menu":
+            res = db.fetch_all("SELECT * FROM productos_menu")
+            menu = [{"id": r[0], "nombre": r[1], "precio": r[2], "categoria": r[3]} for r in res]
+            response = {"status": "success", "data": menu}
+
+        elif self.path == "/api/categorias":
+            res = db.fetch_all("SELECT DISTINCT categoria FROM productos_menu")
+            categorias = [r[0] for r in res if r[0]]
+            response = {"status": "success", "data": categorias}
+            
+        elif self.path == "/api/pedidos":
+            res = db.fetch_all("SELECT * FROM pedidos WHERE estado != 'PAGADO'")
+            pedidos = [{"id": r[0], "numero": r[1], "mesa": r[2], "total": r[4], "estado": r[6]} for r in res]
+            response = {"status": "success", "data": pedidos}
+
+        elif self.path == "/api/tv/listo":
+            # Pedidos listos para ser retirados (para la pantalla de TV)
+            res = db.fetch_all("SELECT numero, mesa FROM pedidos WHERE estado = 'LISTO' LIMIT 10")
+            pedidos = [{"numero": r[0], "mesa": r[1]} for r in res]
+            response = {"status": "success", "data": pedidos}
+
+        elif self.path == "/api/status":
+            response = {"status": "success", "message": "Servidor PIK'TA ONLINE"}
+
+        elif self.path == "/api/stats":
+            # Ventas de hoy
+            today = datetime.now().strftime('%Y-%m-%d')
+            ventas_res = db.fetch_one("SELECT SUM(total) FROM pedidos WHERE estado = 'PAGADO' AND date(created_at) = date(?)", (today,))
+            ventas = ventas_res[0] if ventas_res and ventas_res[0] else 0.0
+            
+            # Pedidos totales hoy
+            pedidos_res = db.fetch_one("SELECT COUNT(*) FROM pedidos WHERE date(created_at) = date(?)", (today,))
+            pedidos = pedidos_res[0] if pedidos_res else 0
+            
+            # Estado de caja (última sesión)
+            caja_res = db.fetch_one("SELECT estado FROM caja_sesiones ORDER BY id DESC LIMIT 1")
+            caja_abierta = (caja_res[0] == 'ABIERTA') if caja_res else False
+            
+            # Stock de ingredientes (los 5 más bajos para el dashboard)
+            stock_res = db.fetch_all("SELECT nombre, cantidad, stock_minimo FROM inventario ORDER BY (cantidad/stock_minimo) ASC LIMIT 5")
+            stock_data = []
+            for s in stock_res:
+                pct = int((s[1] / s[2]) * 100) if s[2] > 0 else 100
+                stock_data.append({"nombre": s[0], "pct": pct})
+                
+            response = {
+                "status": "success",
+                "ventas": ventas,
+                "pedidos": pedidos,
+                "caja": caja_abierta,
+                "stock": stock_data
+            }
+
+        elif self.path == "/api/inventory":
+            res = db.fetch_all("SELECT id, nombre, cantidad, unidad, stock_minimo FROM inventario")
+            inv = []
+            for r in res:
+                status = "OK"
+                if r[2] <= 0: status = "AGOTADO"
+                elif r[2] <= r[4]: status = "BAJO"
+                inv.append({"id": r[0], "nombre": r[1], "cantidad": r[2], "unidad": r[3], "status": status})
+            response = {"status": "success", "data": inv}
+
+        elif self.path == "/api/users":
+            u_res = db.fetch_all("SELECT id, username, rol, nombre_completo FROM usuarios")
+            usuarios = [{"id": r[0], "username": r[1], "rol": r[2], "nombre": r[3]} for r in u_res]
+            
+            c_res = db.fetch_all("""
+                SELECT c.fecha_cierre, u.username, c.monto_final 
+                FROM cierres_caja c 
+                JOIN usuarios u ON c.usuario_id = u.id 
+                ORDER BY c.id DESC LIMIT 10
+            """)
+            cierres = [{"fecha": r[0], "usuario": r[1], "total": r[2]} for r in c_res]
+            
+            response = {"status": "success", "usuarios": usuarios, "cierres": cierres}
+
+        elif self.path == "/api/tables":
+            # Obtener estado de mesas (ocupadas vs libres)
+            res = db.fetch_all("SELECT mesa, estado FROM pedidos WHERE estado != 'PAGADO'")
+            occupied = {r[0]: r[1] for r in res}
+            response = {"status": "success", "occupied": occupied}
+
+        elif self.path.startswith("/api/pedidos/detalles"):
+            # Obtener detalles de un pedido específico por mesa o ID
+            import urllib.parse
+            query = urllib.parse.urlparse(self.path).query
+            params = urllib.parse.parse_qs(query)
+            mesa = params.get('mesa', [None])[0]
+            order_id = params.get('id', [None])[0]
+            
+            if order_id:
+                res = db.fetch_one("SELECT items, total, mesa, numero FROM pedidos WHERE id = ?", (order_id,))
+            elif mesa:
+                res = db.fetch_one("SELECT items, total, mesa, numero FROM pedidos WHERE mesa = ? AND estado != 'PAGADO' ORDER BY id DESC LIMIT 1", (mesa,))
+            else:
+                res = None
+                
+            if res:
+                response = {
+                    "status": "success", 
+                    "items": json.loads(res[0]), 
+                    "total": res[1], 
+                    "mesa": res[2],
+                    "numero": res[3]
+                }
+            else:
+                response = {"status": "error", "message": "Pedido no encontrado"}
+
+        elif self.path == "/api/caja/cierre":
+            try:
+                user_id = data.get('usuario_id')
+                
+                # 1. Obtener última sesión abierta
+                sesion = db.fetch_one("SELECT id, monto_inicial FROM caja_sesiones WHERE estado = 'ABIERTA' AND usuario_id = ? ORDER BY id DESC LIMIT 1", (user_id,))
+                if not sesion:
+                    response = {"status": "error", "message": "No hay una sesión de caja abierta para este usuario."}
+                else:
+                    sesion_id = sesion[0]
+                    monto_inicial = sesion[1]
+                    
+                    # 2. Calcular total de ventas en esta sesión
+                    ventas_res = db.fetch_one("SELECT SUM(total) FROM pedidos WHERE sesion_id = ? AND estado = 'PAGADO'", (sesion_id,))
+                    ventas_total = ventas_res[0] if ventas_res and ventas_res[0] else 0.0
+                    monto_final = monto_inicial + ventas_total
+                    
+                    # 3. Insertar en cierres_caja
+                    db.execute_query("INSERT INTO cierres_caja (usuario_id, monto_inicial, monto_final, fecha_cierre) VALUES (?,?,?,?)", 
+                                    (user_id, monto_inicial, monto_final, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+                    
+                    # 4. Cerrar sesión de caja
+                    db.execute_query("UPDATE caja_sesiones SET estado = 'CERRADA', fecha_cierre = ? WHERE id = ?", 
+                                    (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), sesion_id))
+                    
+                    response = {"status": "success", "message": "Cierre de caja realizado con éxito", "total": monto_final}
+            except Exception as e:
+                response = {"status": "error", "message": str(e)}
+
+        self._set_headers()
+        self.wfile.write(json.dumps(response).encode())
+
+    def do_POST(self):
+        """Maneja peticiones POST para recibir datos de la APK/Web."""
+        db = DatabaseManager(DB_NAME)
+        try:
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            data = json.loads(post_data.decode('utf-8'))
+        except:
+            self._set_headers(400)
+            self.wfile.write(json.dumps({"status": "error", "message": "Cuerpo de petición inválido"}).encode())
+            return
+        
+        response = {"status": "error", "message": "Endpoint POST no encontrado"}
+        
+        if self.path == "/api/login":
+            try:
+                user = data.get('username')
+                pwd = data.get('password')
+                logging.info(f"Intento de login para usuario: {user}")
+                # Búsqueda insensible a mayúsculas para coincidir con el sistema POS
+                res = db.fetch_one("SELECT id, username, rol, nombre_completo FROM usuarios WHERE LOWER(username) = LOWER(?) AND password = ?", (user, pwd))
+                if res:
+                    response = {
+                        "status": "success", 
+                        "data": {"id": res[0], "username": res[1], "rol": res[2], "nombre": res[3]}
+                    }
+                    logging.info(f"Login exitoso: {user}")
+                else:
+                    response = {"status": "error", "message": "Credenciales inválidas"}
+                    logging.warning(f"Login fallido para: {user}")
+            except Exception as e:
+                logging.error(f"Error en login API: {e}")
+                response = {"status": "error", "message": str(e)}
+                
+        elif self.path == "/api/pedidos/nuevo":
+            try:
+                num = data.get('numero') or f"WEB-{datetime.now().strftime('%H%M%S')}"
+                mesa = data.get('mesa')
+                items = json.dumps(data.get('items'))
+                total = data.get('total')
+                canal = data.get('canal', 'API')
+                user_id = data.get('usuario_id')
+                
+                # Si es una mesa, verificar si ya existe una abierta
+                if mesa != "Para Llevar":
+                    existing = db.fetch_one("SELECT id FROM pedidos WHERE mesa = ? AND estado != 'PAGADO'", (mesa,))
+                    if existing:
+                        db.execute_query("UPDATE pedidos SET items = ?, total = ? WHERE id = ?", (items, total, existing[0]))
+                        response = {"status": "success", "message": "Pedido de mesa actualizado", "numero": num}
+                        self._set_headers()
+                        self.wfile.write(json.dumps(response).encode())
+                        return
+
+                db.execute_query("INSERT INTO pedidos (numero, mesa, items, total, canal, estado, usuario_id) VALUES (?, ?, ?, ?, ?, ?, ?)", 
+                                (num, mesa, items, total, canal, "PENDIENTE_PAGO", user_id))
+                response = {"status": "success", "message": "Pedido creado correctamente", "numero": num}
+            except Exception as e:
+                response = {"status": "error", "message": f"Error al guardar pedido: {e}"}
+
+        elif self.path == "/api/pedidos/actualizar":
+            try:
+                order_id = data.get('id')
+                items = json.dumps(data.get('items'))
+                total = data.get('total')
+                
+                db.execute_query("UPDATE pedidos SET items = ?, total = ? WHERE id = ?", (items, total, order_id))
+                response = {"status": "success", "message": "Pedido actualizado correctamente"}
+            except Exception as e:
+                response = {"status": "error", "message": f"Error al actualizar pedido: {e}"}
+
+        elif self.path == "/api/pedidos/status":
+            try:
+                order_id = data.get('id')
+                new_status = data.get('estado')
+                db.execute_query("UPDATE pedidos SET estado = ? WHERE id = ?", (new_status, order_id))
+                response = {"status": "success", "message": f"Estado actualizado a {new_status}"}
+            except Exception as e:
+                response = {"status": "error", "message": f"Error: {e}"}
+
+        elif self.path == "/api/cobrar":
+            try:
+                order_id = data.get('id')
+                metodo = data.get('metodo', 'EFECTIVO')
+                
+                # Obtener última sesión abierta
+                sesion_res = db.fetch_one("SELECT id FROM caja_sesiones WHERE estado = 'ABIERTA' ORDER BY id DESC LIMIT 1")
+                sesion_id = sesion_res[0] if sesion_res else None
+                
+                # Marcar como pagado
+                db.execute_query("UPDATE pedidos SET estado = 'PAGADO', metodo_pago = ?, sesion_id = ? WHERE id = ?", 
+                                (metodo, sesion_id, order_id))
+                
+                response = {"status": "success", "message": "Pago procesado correctamente"}
+            except Exception as e:
+                response = {"status": "error", "message": f"Error al procesar pago: {e}"}
+
+        elif self.path == "/api/menu/save":
+            # Crear o editar producto
+            try:
+                pid = data.get('id')
+                nom = data.get('nombre')
+                pre = data.get('precio')
+                cat = data.get('categoria')
+                if pid:
+                    db.execute_query("UPDATE productos_menu SET nombre=?, precio=?, categoria=? WHERE id=?", (nom, pre, cat, pid))
+                else:
+                    db.execute_query("INSERT INTO productos_menu (nombre, precio, categoria) VALUES (?,?,?)", (nom, pre, cat))
+                response = {"status": "success", "message": "Producto guardado"}
+            except Exception as e:
+                response = {"status": "error", "message": str(e)}
+
+        elif self.path == "/api/menu/delete":
+            try:
+                pid = data.get('id')
+                db.execute_query("DELETE FROM productos_menu WHERE id=?", (pid,))
+                response = {"status": "success", "message": "Producto eliminado"}
+            except Exception as e:
+                response = {"status": "error", "message": str(e)}
+
+        elif self.path == "/api/users/save":
+            try:
+                uid = data.get('id')
+                user = data.get('username')
+                pwd = data.get('password')
+                rol = data.get('rol')
+                nom = data.get('nombre')
+                if uid:
+                    if pwd:
+                        db.execute_query("UPDATE usuarios SET username=?, password=?, rol=?, nombre_completo=? WHERE id=?", (user, pwd, rol, nom, uid))
+                    else:
+                        db.execute_query("UPDATE usuarios SET username=?, rol=?, nombre_completo=? WHERE id=?", (user, rol, nom, uid))
+                else:
+                    db.execute_query("INSERT INTO usuarios (username, password, rol, nombre_completo) VALUES (?,?,?,?)", (user, pwd, rol, nom))
+                response = {"status": "success", "message": "Usuario guardado"}
+            except Exception as e:
+                response = {"status": "error", "message": str(e)}
+
+        elif self.path == "/api/users/delete":
+            try:
+                uid = data.get('id')
+                db.execute_query("DELETE FROM usuarios WHERE id=?", (uid,))
+                response = {"status": "success", "message": "Usuario eliminado"}
+            except Exception as e:
+                response = {"status": "error", "message": str(e)}
+
+        elif self.path == "/api/inventory/save":
+            try:
+                iid = data.get('id')
+                nom = data.get('nombre')
+                cant = data.get('cantidad')
+                uni = data.get('unidad')
+                min_stock = data.get('stock_minimo')
+                if iid:
+                    db.execute_query("UPDATE inventario SET nombre=?, cantidad=?, unidad=?, stock_minimo=? WHERE id=?", (nom, cant, uni, min_stock, iid))
+                else:
+                    db.execute_query("INSERT INTO inventario (nombre, cantidad, unidad, stock_minimo) VALUES (?,?,?,?)", (nom, cant, uni, min_stock))
+                response = {"status": "success", "message": "Insumo guardado"}
+            except Exception as e:
+                response = {"status": "error", "message": str(e)}
+
+        elif self.path == "/api/inventory/delete":
+            try:
+                iid = data.get('id')
+                db.execute_query("DELETE FROM inventario WHERE id=?", (iid,))
+                response = {"status": "success", "message": "Insumo eliminado"}
+            except Exception as e:
+                response = {"status": "error", "message": str(e)}
+
+        self._set_headers()
+        self.wfile.write(json.dumps(response).encode())
+
+    def log_message(self, format, *args):
+        return # Desactivar mensajes de log en consola

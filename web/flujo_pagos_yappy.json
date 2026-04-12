@@ -1,0 +1,90 @@
+{
+  "name": "Restaurante — Integración de Pagos Yappy",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "yappy-webhook",
+        "responseMode": "responseNode"
+      },
+      "id": "webhook-yappy",
+      "name": "Webhook Confirmación Yappy",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "notes": "Recibe la notificación de pago exitoso desde la API de Yappy"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extrae ID de pedido y monto pagado\nconst body = $input.first().json.body;\nreturn [{\n  json: {\n    pedidoId: body.orderId,\n    monto: body.amount,\n    transaccionId: body.transactionId,\n    fecha: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "parse-pago",
+      "name": "Parsear Pago",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE pedidos SET pagado = true, metodo_pago = 'YAPPY', estado = 'EN_PREPARACION', updated_at = NOW() WHERE numero = $1 RETURNING cliente_telefono, total"
+      },
+      "id": "actualizar-pedido-db",
+      "name": "Actualizar Pedido en DB",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [680, 300],
+      "notes": "Marca el pedido como pagado y lo mueve a preparación automáticamente"
+    },
+    {
+      "parameters": {
+        "url": "https://graph.facebook.com/v18.0/{{ $env.WHATSAPP_PHONE_NUMBER_ID }}/messages",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "=",
+              "value": "={{ JSON.stringify({ messaging_product: 'whatsapp', to: $json.cliente_telefono, type: 'text', text: { body: `💰 *Pago confirmado via Yappy!*\n\nTu pedido ya está en cocina. Te avisaremos cuando esté listo. ¡Gracias por tu compra! 🍔` } }) }}"
+            }
+          ]
+        }
+      },
+      "id": "notificar-cliente-pago",
+      "name": "Notificar al Cliente",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [900, 200]
+    },
+    {
+      "parameters": {
+        "url": "{{ $env.KDS_WEBHOOK_URL }}",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "=",
+              "value": "={{ JSON.stringify({ action: 'UPDATE_ORDER_STATUS', pedidoId: $json.numero, status: 'PAID' }) }}"
+            }
+          ]
+        }
+      },
+      "id": "actualizar-kds",
+      "name": "Actualizar KDS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [900, 400],
+      "notes": "Informa a la cocina que el pedido ya fue pagado"
+    }
+  ],
+  "connections": {
+    "Webhook Confirmación Yappy": { "main": [[{ "node": "Parsear Pago", "type": "main", "index": 0 }]] },
+    "Parsear Pago": { "main": [[{ "node": "Actualizar Pedido en DB", "type": "main", "index": 0 }]] },
+    "Actualizar Pedido en DB": {
+      "main": [[
+        { "node": "Notificar al Cliente", "type": "main", "index": 0 },
+        { "node": "Actualizar KDS", "type": "main", "index": 0 }
+      ]]
+    }
+  },
+  "settings": { "executionOrder": "v1" }
+}

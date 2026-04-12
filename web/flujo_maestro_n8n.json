@@ -1,0 +1,154 @@
+{
+  "name": "n8n — Motor de Automatización Maestro (HUB)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "entrada-pedidos-universal",
+        "responseMode": "responseNode"
+      },
+      "id": "webhook-entrada-hub",
+      "name": "Entrada Pedidos (Webhook)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "notes": "Recibe pedidos de: WhatsApp, Kiosco, App/Web o POS"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normaliza los datos de entrada según el canal\nconst body = $input.first().json.body;\nconst canal = body.canal || 'DESCONOCIDO';\n\nreturn [{\n  json: {\n    pedido: {\n      id: 'ORD-' + Date.now().toString().slice(-6),\n      cliente: body.cliente || 'Sin Nombre',\n      telefono: body.telefono || '',\n      items: body.items || [],\n      total: body.total || 0,\n      canal: canal,\n      metodoPago: body.metodoPago || 'PENDIENTE',\n      notas: body.notas || ''\n    }\n  }\n}];"
+      },
+      "id": "normalizar-datos",
+      "name": "Normalizar Datos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "table": "pedidos",
+        "columns": "numero, cliente_nombre, cliente_telefono, items, total, canal, estado",
+        "values": "={{ $json.pedido.id }}, {{ $json.pedido.cliente }}, {{ $json.pedido.telefono }}, {{ JSON.stringify($json.pedido.items) }}, {{ $json.pedido.total }}, {{ $json.pedido.canal }}, 'RECIBIDO'"
+      },
+      "id": "guardar-central",
+      "name": "Guardar en Base de Datos",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {},
+      "id": "split-processing",
+      "name": "Distribuir Pedido",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [900, 300],
+      "notes": "Aquí el flujo se divide en los 3 sistemas de procesamiento de la imagen"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://damion-duckier-kate.ngrok-free.dev/api/orders",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "ngrok-skip-browser-warning",
+              "value": "true"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "=", "value": "={{ JSON.stringify($json.pedido) }}" }
+          ]
+        }
+      },
+      "id": "enviar-cocina-kds",
+      "name": "🟢 Salida 1: Enviar a Mi PC (API)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1120, 150],
+      "notes": "Envía el pedido desde la nube (n8n) hasta tu PC local vía ngrok"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT descontar_inventario_por_pedido($1)"
+      },
+      "id": "procesar-inventario",
+      "name": "🔵 Salida 2: Inventario",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "url": "{{ $env.POS_API_URL }}/facturar",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "=", "value": "={{ JSON.stringify($json.pedido) }}" }
+          ]
+        }
+      },
+      "id": "enviar-facturacion",
+      "name": "🟠 Salida 3: POS + Facturación",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1120, 450]
+    },
+    {
+      "parameters": {
+        "url": "https://graph.facebook.com/v18.0/{{ $env.WHATSAPP_PHONE_NUMBER_ID }}/messages",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "=",
+              "value": "={{ JSON.stringify({ messaging_product: 'whatsapp', to: $json.pedido.telefono, type: 'text', text: { body: `✅ *Pedido Confirmado: ${$json.pedido.id}*\\nEstamos preparando tu orden. Te avisaremos cuando esté lista.` } }) }}"
+            }
+          ]
+        }
+      },
+      "id": "whatsapp-confirmacion",
+      "name": "⚪ Salida: Confirmación WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1400, 200]
+    },
+    {
+      "parameters": {
+        "url": "{{ $env.PRINTER_WEBHOOK_URL }}",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "=", "value": "={{ JSON.stringify($json.pedido) }}" }
+          ]
+        }
+      },
+      "id": "ticket-comanda",
+      "name": "⚪ Salida: Ticket / Comanda",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1400, 400]
+    }
+  ],
+  "connections": {
+    "Entrada Pedidos (Webhook)": { "main": [[{ "node": "Normalizar Datos", "type": "main", "index": 0 }]] },
+    "Normalizar Datos": { "main": [[{ "node": "Guardar en Base de Datos", "type": "main", "index": 0 }]] },
+    "Guardar en Base de Datos": { "main": [[{ "node": "Distribuir Pedido", "type": "main", "index": 0 }]] },
+    "Distribuir Pedido": {
+      "main": [
+        [{ "node": "enviar-cocina-kds", "type": "main", "index": 0 }],
+        [{ "node": "procesar-inventario", "type": "main", "index": 0 }],
+        [{ "node": "enviar-facturacion", "type": "main", "index": 0 }]
+      ]
+    },
+    "enviar-cocina-kds": { "main": [[{ "node": "whatsapp-confirmacion", "type": "main", "index": 0 }]] },
+    "procesar-inventario": { "main": [[{ "node": "ticket-comanda", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}
