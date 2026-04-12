@@ -16,13 +16,14 @@ Notas:
 """
 
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, simpledialog
 import sqlite3
 import json
 import os
 from datetime import datetime
 import logging
 import sys
+import tempfile
 
 logging.basicConfig(filename='error_log.txt', filemode='a', level=logging.ERROR,
                     format='%(asctime)s - %(levelname)s - %(message)s')
@@ -157,6 +158,7 @@ class DatabaseManager:
             self._ensure_column('pedidos', 'canal', 'TEXT')
             self._ensure_column('pedidos', 'usuario_id', 'INTEGER')
             self._ensure_column('pedidos', 'sesion_id', 'INTEGER')
+            self._ensure_column('pedidos', 'created_at', 'TEXT')
 
             # Seed seguros (no duplicarán por UNIQUE)
             seeds = [
@@ -181,6 +183,17 @@ class DatabaseManager:
                 action TEXT,
                 details TEXT,
                 created_at TEXT
+            )''')
+
+            # Tabla sesiones de caja
+            cur.execute('''CREATE TABLE IF NOT EXISTS caja_sesiones (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                usuario_id INTEGER,
+                inicio TEXT,
+                inicial REAL DEFAULT 0,
+                estado TEXT DEFAULT 'ABIERTO',
+                cierre_total REAL,
+                cierre_at TEXT
             )''')
 
             conn.commit()
@@ -234,8 +247,12 @@ class DatabaseManager:
 
 class POSFrame(tk.Frame):
     def __init__(self, parent, db: DatabaseManager, *args, **kwargs):
+        # accept user from kwargs
+        user = kwargs.pop('user', None)
         super().__init__(parent, bg='#0B1220', *args, **kwargs)
         self.db = db
+        self.user = user
+        self.session_id = None
         self.cart = []
         header = tk.Frame(self, bg='#0B1220')
         header.pack(fill='x', padx=12, pady=8)
@@ -244,6 +261,9 @@ class POSFrame(tk.Frame):
             tk.Label(header, image=pos_img, bg='#0B1220').pack(side='left', padx=6)
             self._pos_img = pos_img
         tk.Label(header, text='🛒 POS - Punto de Venta Intelligent', bg='#0B1220', fg='white', font=(None, 16, 'bold')).pack(side='left')
+        # Caja controls
+        tk.Button(header, text='Abrir Caja', command=self.open_caja, bg=ACCENT, fg='white').pack(side='right', padx=6)
+        tk.Button(header, text='Cerrar Caja', command=self.cerrar_caja, bg=ERR, fg='white').pack(side='right', padx=6)
 
         body = tk.Frame(self, bg='#0B1220')
         body.pack(fill='both', expand=True, padx=12, pady=6)
@@ -324,14 +344,89 @@ class POSFrame(tk.Frame):
         # Inserta pedido simple
         items = ','.join([p[1] for p in self.cart])
         try:
-            self.db.execute('INSERT INTO pedidos (numero, items, subtotal, total, estado, canal) VALUES (?,?,?,?,?,?)',
-                            (f"POS-{datetime.now().strftime('%Y%m%d%H%M%S')}", items, 0, 0, 'RECIBIDO', 'CAJA'))
+            numero = f"POS-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+            created_at = datetime.now().isoformat()
+            usuario_id = self.user.get('id') if self.user else None
+            sesion_id = self.session_id
+            self.db.execute('INSERT INTO pedidos (numero, items, subtotal, total, estado, canal, usuario_id, sesion_id, created_at) VALUES (?,?,?,?,?,?,?,?,?)',
+                            (numero, items, 0, 0, 'RECIBIDO', 'CAJA', usuario_id, sesion_id, created_at))
             messagebox.showinfo('OK', 'Pedido procesado')
         except Exception as e:
             logging.error(f'Error procesando pedido POS: {e}')
             messagebox.showerror('Error', 'No se pudo crear el pedido')
         self.cart.clear()
         self.cart_list.delete(0, 'end')
+
+    def open_caja(self):
+        if self.session_id:
+            messagebox.showinfo('Caja', 'Ya hay una sesión de caja abierta')
+            return
+        inicial = simpledialog.askfloat('Abrir Caja', 'Monto inicial:', minvalue=0.0)
+        if inicial is None:
+            return
+        usuario_id = self.user.get('id') if self.user else None
+        inicio = datetime.now().isoformat()
+        try:
+            cur = self.db.execute('INSERT INTO caja_sesiones (usuario_id, inicio, inicial, estado) VALUES (?,?,?,?)', (usuario_id, inicio, inicial, 'ABIERTO'))
+            self.session_id = cur.lastrowid
+            messagebox.showinfo('Caja', f'Caja abierta (ID {self.session_id})')
+        except Exception as e:
+            logging.exception(f'Error abriendo caja: {e}')
+            messagebox.showerror('Error', 'No se pudo abrir la caja')
+
+    def cerrar_caja(self):
+        if not self.session_id:
+            messagebox.showwarning('Caja', 'No hay sesión de caja abierta')
+            return
+        # calcular totales de esta sesion
+        rows = self.db.fetch_all('SELECT id, items FROM pedidos WHERE sesion_id = ? AND canal = ?', (self.session_id, 'CAJA'))
+        total = 0.0
+        detalles = []
+        for r in rows:
+            detalles.append(f"Pedido #{r[0]}: {r[1]}")
+        total = len(rows)
+        cierre_at = datetime.now().isoformat()
+        try:
+            self.db.execute('UPDATE caja_sesiones SET estado = ?, cierre_total = ?, cierre_at = ? WHERE id = ?', ('CERRADO', total, cierre_at, self.session_id))
+        except Exception:
+            logging.exception('Error cerrando caja')
+        report_lines = []
+        report_lines.append('Cierre de Caja Report')
+        report_lines.append(f'Caja ID: {self.session_id}')
+        report_lines.append(f'Usuario: {self.user.get("username") if self.user else ""}')
+        report_lines.append(f'Inicio: {cierre_at}')
+        report_lines.append('---')
+        report_lines.extend(detalles)
+        report_lines.append('---')
+        report_lines.append(f'Total pedidos: {total}')
+        report_text = '\n'.join(report_lines)
+        # show report in products_frame (replace content temporarily)
+        self.show_report(report_text)
+        # attempt to print by saving to temp file and using os.startfile on Windows
+        try:
+            fd, path = tempfile.mkstemp(prefix='cierre_caja_', suffix='.txt')
+            with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                f.write(report_text)
+            if os.name == 'nt':
+                try:
+                    os.startfile(path, 'print')
+                except Exception:
+                    logging.exception('Error sending to printer')
+        except Exception:
+            logging.exception('Error creando archivo de reporte')
+        # clear session id
+        self.session_id = None
+
+    def show_report(self, text):
+        # clear products_frame and show report with back button
+        for w in self.products_frame.winfo_children():
+            w.destroy()
+        frm = tk.Frame(self.products_frame, bg='white')
+        frm.pack(fill='both', expand=True)
+        t = tk.Text(frm)
+        t.insert('1.0', text)
+        t.pack(fill='both', expand=True)
+        tk.Button(frm, text='Volver', command=self.render_products, bg=ACCENT, fg='white').pack(pady=6)
 
 
 class KDSFrame(tk.Frame):
@@ -611,9 +706,22 @@ class App(tk.Tk):
         tk.Label(header, text=f"Bienvenido {self.user.get('nombre_completo')}", bg=BG, fg=FG, font=(None, 12)).pack()
         tk.Label(header, text='Sistema Restaurante', bg=BG, fg=FG, font=(None, 22, 'bold')).pack()
 
-        # En lugar de abrir nuevas ventanas, creamos un Notebook (una sola ventana con pestañas)
+        # En lugar de abrir nuevas ventanas, creamos un Notebook (usado internamente) y ocultamos pestañas.
+        style = ttk.Style()
+        try:
+            style.layout('TNotebook.Tab', [])
+        except Exception:
+            pass
         self.notebook = ttk.Notebook(self)
         self.notebook.pack(fill='both', expand=True, padx=12, pady=12)
+
+        # Navigation buttons (replace visible tab bar)
+        nav = tk.Frame(self, bg=BG)
+        nav.pack(fill='x')
+        tk.Button(nav, text='Home', command=lambda: self.notebook.select(0), bg=PANEL, fg=FG).pack(side='left', padx=6, pady=6)
+        tk.Button(nav, text='Caja / POS', command=self.open_pos, bg=PANEL, fg=FG).pack(side='left', padx=6, pady=6)
+        tk.Button(nav, text='Cocina (KDS)', command=self.open_kds, bg=PANEL, fg=FG).pack(side='left', padx=6, pady=6)
+        tk.Button(nav, text='Admin', command=self.open_admin, bg=PANEL, fg=FG).pack(side='left', padx=6, pady=6)
 
         role = self.user.get('rol', '').lower()
 
@@ -659,12 +767,12 @@ class App(tk.Tk):
 
         # POS tab
         if role in ('administrador', 'admin') or role in ('mesero', 'cajera', 'supervisor'):
-            pos_tab = POSFrame(self.notebook, self.db)
+            pos_tab = POSFrame(self.notebook, self.db, user=self.user)
             self.notebook.add(pos_tab, text='Caja / POS')
 
         # KDS tab
         if role in ('administrador', 'admin') or role in ('cocina',):
-            kds_tab = KDSFrame(self.notebook, self.db)
+            kds_tab = KDSFrame(self.notebook, self.db, user=self.user)
             self.notebook.add(kds_tab, text='Cocina (KDS)')
 
         # Admin tab
