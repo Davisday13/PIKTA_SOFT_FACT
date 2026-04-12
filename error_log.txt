@@ -2115,3 +2115,17 @@ Traceback (most recent call last):
         (widgetName, self._w) + extra + self._options(cnf))
         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 _tkinter.TclError: unknown option "-user"
+2026-04-11 23:14:55,073 - ERROR - DB execute error: table caja_sesiones has no column named inicio - Query: INSERT INTO caja_sesiones (usuario_id, inicio, inicial, estado) VALUES (?,?,?,?) - Params: (1, '2026-04-11T23:14:55.072254', 10.0, 'ABIERTO')
+Traceback (most recent call last):
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\main_app.py", line 240, in execute
+    cur.execute(query, params)
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^
+sqlite3.OperationalError: table caja_sesiones has no column named inicio
+2026-04-11 23:14:55,081 - ERROR - Error abriendo caja: table caja_sesiones has no column named inicio
+Traceback (most recent call last):
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\main_app.py", line 373, in open_caja
+    cur = self.db.execute('INSERT INTO caja_sesiones (usuario_id, inicio, inicial, estado) VALUES (?,?,?,?)', (usuario_id, inicio, inicial, 'ABIERTO'))
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\main_app.py", line 240, in execute
+    cur.execute(query, params)
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^
+sqlite3.OperationalError: table caja_sesiones has no column named inicio

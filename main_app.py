@@ -198,6 +198,13 @@ class DatabaseManager:
 
             conn.commit()
 
+            # Ensure caja_sesiones columns exist for older DBs
+            self._ensure_column('caja_sesiones', 'inicio', 'TEXT')
+            self._ensure_column('caja_sesiones', 'inicial', 'REAL')
+            self._ensure_column('caja_sesiones', 'estado', 'TEXT')
+            self._ensure_column('caja_sesiones', 'cierre_total', 'REAL')
+            self._ensure_column('caja_sesiones', 'cierre_at', 'TEXT')
+
     def _ensure_column(self, table, column, col_type):
         """Añade una columna sólo si no existe (para migraciones seguras)."""
         with self.get_connection() as conn:
@@ -465,12 +472,14 @@ class KDSFrame(tk.Frame):
         if kds_img:
             tk.Label(self, image=kds_img, bg='#071026').pack(anchor='w', padx=12)
             self._kds_img = kds_img
-        self.listbox = tk.Listbox(self, height=20, width=60)
-        self.listbox.pack(padx=12, pady=8)
+        # Use dark list background and remove borders so it blends with the panel
+        self.listbox = tk.Listbox(self, height=20, width=60, bg=PANEL, fg=FG, bd=0, highlightthickness=0, selectbackground=ACCENT)
+        self.listbox.pack(padx=12, pady=8, fill='both', expand=True)
         btns = tk.Frame(self, bg='#071026')
-        btns.pack()
-        tk.Button(btns, text='Refrescar', command=self.refresh, bg='#60a5fa').pack(side='left', padx=6)
-        tk.Button(btns, text='Marcar listo', command=self.mark_ready, bg='#34d399').pack(side='left', padx=6)
+        btns.pack(pady=8)
+        tk.Button(btns, text='Refrescar', command=self.refresh, bg=ACCENT, fg='white').pack(side='left', padx=6)
+        tk.Button(btns, text='Marcar listo', command=self.mark_ready, bg=OK, fg='white').pack(side='left', padx=6)
+        tk.Button(btns, text='Regresar', command=lambda: self.master.select(0), bg=PANEL, fg=FG).pack(side='left', padx=6)
         self.refresh()
 
     def refresh(self):
