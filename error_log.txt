@@ -2052,3 +2052,45 @@ Params: ()
 2026-04-11 14:35:20,071 - ERROR - Error SQL: duplicate column name: sesion_id
 Query: ALTER TABLE pedidos ADD COLUMN sesion_id INTEGER
 Params: ()
+2026-04-11 22:35:48,506 - ERROR - Uncaught exception
+Traceback (most recent call last):
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\main_app.py", line 893, in <module>
+    app = App()
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\main_app.py", line 580, in __init__
+    self.build()
+    ~~~~~~~~~~^^
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\main_app.py", line 635, in build
+    pos_tab = POSFrame(self.notebook, self.db)
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\main_app.py", line 270, in __init__
+    tk.Button(self.cart_frame, text='Quitar seleccionado', command=self.remove_selected, bg=ERR, fg='white').pack(fill='x', padx=8, pady=4)
+                                                                   ^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'POSFrame' object has no attribute 'remove_selected'
+2026-04-11 22:36:13,062 - ERROR - Uncaught exception
+Traceback (most recent call last):
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\main_app.py", line 893, in <module>
+    app = App()
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\main_app.py", line 580, in __init__
+    self.build()
+    ~~~~~~~~~~^^
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\main_app.py", line 635, in build
+    pos_tab = POSFrame(self.notebook, self.db)
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\main_app.py", line 270, in __init__
+    tk.Button(self.cart_frame, text='Quitar seleccionado', command=self.remove_selected, bg=ERR, fg='white').pack(fill='x', padx=8, pady=4)
+                                                                   ^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'POSFrame' object has no attribute 'remove_selected'
+2026-04-11 22:45:10,648 - ERROR - Uncaught exception
+Traceback (most recent call last):
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\main_app.py", line 885, in <module>
+    app = App()
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\main_app.py", line 572, in __init__
+    self.build()
+    ~~~~~~~~~~^^
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\main_app.py", line 637, in build
+    admin_tab = AdminFrame(self.notebook, self.db)
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\main_app.py", line 439, in __init__
+    self.show_section('inventory')
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\main_app.py", line 447, in show_section
+    self.refresh()
+    ^^^^^^^^^^^^
+AttributeError: 'AdminFrame' object has no attribute 'refresh'

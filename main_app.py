@@ -239,6 +239,10 @@ class POSFrame(tk.Frame):
         self.cart = []
         header = tk.Frame(self, bg='#0B1220')
         header.pack(fill='x', padx=12, pady=8)
+        pos_img = load_image(os.path.join('Imagenes', 'pos.png'), size=(48,48)) or load_image(os.path.join('Imagenes', 'pos.jpeg'), size=(48,48))
+        if pos_img:
+            tk.Label(header, image=pos_img, bg='#0B1220').pack(side='left', padx=6)
+            self._pos_img = pos_img
         tk.Label(header, text='🛒 POS - Punto de Venta Intelligent', bg='#0B1220', fg='white', font=(None, 16, 'bold')).pack(side='left')
 
         body = tk.Frame(self, bg='#0B1220')
@@ -301,6 +305,18 @@ class POSFrame(tk.Frame):
         self.cart.append(product)
         self.cart_list.insert('end', f"{product[1]} - {product[2]}")
 
+    def remove_selected(self):
+        sel = self.cart_list.curselection()
+        if not sel:
+            return
+        idx = sel[0]
+        try:
+            # remove by index from cart list and listbox
+            del self.cart[idx]
+        except Exception:
+            pass
+        self.cart_list.delete(idx)
+
     def process_order(self):
         if not self.cart:
             messagebox.showinfo('Aviso', 'El carrito está vacío')
@@ -323,6 +339,10 @@ class KDSFrame(tk.Frame):
         super().__init__(parent, bg='#071026', *args, **kwargs)
         self.db = db
         tk.Label(self, text='KDS - Cocina', bg='#071026', fg='white', font=(None, 16, 'bold')).pack(anchor='w', padx=12, pady=8)
+        kds_img = load_image(os.path.join('Imagenes', 'cocina.jpeg'), size=(40,40)) or load_image(os.path.join('Imagenes', 'cocina.png'), size=(40,40))
+        if kds_img:
+            tk.Label(self, image=kds_img, bg='#071026').pack(anchor='w', padx=12)
+            self._kds_img = kds_img
         self.listbox = tk.Listbox(self, height=20, width=60)
         self.listbox.pack(padx=12, pady=8)
         btns = tk.Frame(self, bg='#071026')
@@ -352,38 +372,37 @@ class AdminFrame(tk.Frame):
     def __init__(self, parent, db: DatabaseManager, *args, **kwargs):
         super().__init__(parent, bg='#0b1220', *args, **kwargs)
         self.db = db
-        container = tk.Frame(self, bg='#0b1220')
-        container.pack(fill='both', expand=True)
+        # Top navigation (simple) + Back button
+        top = tk.Frame(self, bg='#0b1220')
+        top.pack(fill='x', padx=12, pady=8)
 
-        sidebar = tk.Frame(container, bg=PANEL, width=260)
-        sidebar.pack(side='left', fill='y')
-        sidebar.pack_propagate(False)
+        # optional icon
+        img = load_image(os.path.join('Imagenes', 'admin.jpeg'), size=(48,48)) or load_image(os.path.join('Imagenes', 'admin.png'), size=(48,48))
+        if img:
+            tk.Label(top, image=img, bg='#0b1220').pack(side='left', padx=6)
+            # keep reference
+            self._admin_img = img
 
-        self.content = tk.Frame(container, bg=BG)
-        self.content.pack(side='right', fill='both', expand=True)
+        tk.Label(top, text='Admin - Panel', bg='#0b1220', fg=FG, font=(None, 16, 'bold')).pack(side='left', padx=6)
+        tk.Button(top, text='Regresar', command=lambda: self.master.select(0), bg=ACCENT, fg='white').pack(side='right')
 
-        tk.Label(sidebar, text='🚀 AdminRest', bg=PANEL, fg='white', font=(None, 14, 'bold')).pack(padx=12, pady=12)
-        menu = [
-            ('dashboard', '📊 Dashboard'),
-            ('menu', '🍔 Menú'),
-            ('inventory', '📦 Inventario'),
-            ('sales', '🧾 Ventas'),
-            ('config', '⚙️ Configuración'),
-            ('users', '👥 Usuarios')
-        ]
-        self.current = tk.StringVar(value='inventory')
-        for mid, label in menu:
-            b = tk.Button(sidebar, text=label, anchor='w', width=24, command=lambda m=mid: self.switch(m), bg=PANEL, fg='white')
-            b.pack(padx=8, pady=6)
+        nav = tk.Frame(self, bg='#0b1220')
+        nav.pack(fill='x', padx=12)
+        tk.Button(nav, text='Inventario', command=lambda: self.show_section('inventory'), bg=PANEL, fg=FG).pack(side='left', padx=6, pady=6)
+        tk.Button(nav, text='Usuarios', command=lambda: self.show_section('users'), bg=PANEL, fg=FG).pack(side='left', padx=6, pady=6)
+        tk.Button(nav, text='Dashboard', command=lambda: self.show_section('dashboard'), bg=PANEL, fg=FG).pack(side='left', padx=6, pady=6)
 
-        # frames for content
+        # content area
+        self.content = tk.Frame(self, bg=BG)
+        self.content.pack(fill='both', expand=True, padx=12, pady=12)
+
         self.frames = {}
-        for key in ('dashboard', 'menu', 'inventory', 'sales', 'config', 'users'):
+        for key in ('dashboard', 'inventory', 'users'):
             f = tk.Frame(self.content, bg=BG)
             f.place(relx=0, rely=0, relwidth=1, relheight=1)
             self.frames[key] = f
 
-        # users frame content
+        # populate users frame
         uf = self.frames['users']
         tk.Label(uf, text='Usuarios', bg=BG, fg=FG, font=(None, 14, 'bold')).pack(anchor='w', padx=12, pady=6)
         self.user_tree = ttk.Treeview(uf, columns=('id', 'username', 'rol', 'nombre'), show='headings')
@@ -406,53 +425,98 @@ class AdminFrame(tk.Frame):
         self.e_nombre.grid(row=3, column=1)
         tk.Button(form, text='Crear', command=self.create_user, bg='#60a5fa').grid(row=4, column=0, columnspan=2, pady=8)
 
-        # inventory content
+        # inventory frame
         invf = self.frames['inventory']
         tk.Label(invf, text='Inventario', bg=BG, fg=FG, font=(None, 14, 'bold')).pack(anchor='w', padx=12, pady=6)
         self.inv_list = tk.Frame(invf, bg=BG)
         self.inv_list.pack(fill='both', expand=True, padx=12, pady=6)
 
-        # access logs quick button
-        tk.Button(sidebar, text='Ver accesos', command=self.show_access_logs, bg='#6366f1', fg='white').pack(padx=8, pady=6)
+        # dashboard simple
+        df = self.frames['dashboard']
+        tk.Label(df, text='Dashboard', bg=BG, fg=FG, font=(None, 14, 'bold')).pack(anchor='w', padx=12, pady=6)
 
-        self.switch('inventory')
+        # default
+        self.show_section('inventory')
         self.refresh()
 
-    def switch(self, key):
-        # bring frame to front
-        for k, f in self.frames.items():
+    def show_section(self, key):
+        for k,f in self.frames.items():
             if k == key:
                 f.lift()
-        self.current.set(key)
+        # refresh when showing
+        self.refresh()
 
     def refresh(self):
-        # refresh users
+        # refresh users list
         try:
-            for r in self.user_tree.get_children():
-                self.user_tree.delete(r)
+            if hasattr(self, 'user_tree'):
+                for r in self.user_tree.get_children():
+                    self.user_tree.delete(r)
+                rows = self.db.fetch_all('SELECT id, username, rol, nombre_completo FROM usuarios')
+                for row in rows:
+                    self.user_tree.insert('', 'end', values=row)
         except Exception:
-            pass
-        rows = self.db.fetch_all('SELECT id, username, rol, nombre_completo FROM usuarios')
-        for row in rows:
-            self.user_tree.insert('', 'end', values=row)
+            logging.exception('Error refreshing users in AdminFrame')
 
-        # inventory
-        for w in self.inv_list.winfo_children():
-            w.destroy()
-        rows = self.db.fetch_all('SELECT id, ingrediente, cantidad, unidad, stock_minimo FROM inventario')
-        if not rows:
-            tk.Label(self.inv_list, text='Inventario vacío', bg=BG, fg=FG).pack()
+        # refresh inventory list
+        try:
+            for w in self.inv_list.winfo_children():
+                w.destroy()
+            rows = self.db.fetch_all('SELECT id, ingrediente, cantidad, unidad, stock_minimo FROM inventario')
+            if not rows:
+                tk.Label(self.inv_list, text='Inventario vacío', bg=BG, fg=FG).pack()
+                return
+            for r in rows:
+                card = tk.Frame(self.inv_list, bg='white', bd=1, relief='solid', padx=8, pady=8)
+                card.pack(fill='x', pady=6)
+                left = tk.Frame(card, bg='white')
+                left.pack(side='left')
+                tk.Label(left, text=r[1], font=(None, 12, 'bold'), bg='white').pack()
+                right = tk.Frame(card, bg='white')
+                right.pack(side='right')
+                tk.Label(right, text=f"{r[2]} {r[3]}", bg='white').pack()
+                tk.Button(right, text='+1', command=lambda id=r[0]: self.add_stock(id, 1), bg=OK).pack()
+        except Exception:
+            logging.exception('Error refreshing inventory in AdminFrame')
+
+    def create_user(self):
+        username = self.e_user.get().strip()
+        password = self.e_pass.get().strip()
+        rol = self.e_rol.get().strip() or 'Cajera'
+        nombre = self.e_nombre.get().strip() or username
+        if not username or not password:
+            messagebox.showwarning('Falta', 'Usuario y password son obligatorios')
             return
+        try:
+            self.db.execute('INSERT INTO usuarios (username, password, rol, nombre_completo) VALUES (?, ?, ?, ?)', (username, password, rol, nombre))
+            messagebox.showinfo('OK', 'Usuario creado')
+            self.e_user.delete(0, 'end')
+            self.e_pass.delete(0, 'end')
+            self.e_rol.delete(0, 'end')
+            self.e_nombre.delete(0, 'end')
+            self.refresh()
+        except Exception as e:
+            messagebox.showerror('Error', str(e))
+
+    def add_stock(self, id, amount):
+        try:
+            self.db.execute('UPDATE inventario SET cantidad = cantidad + ? WHERE id = ?', (amount, id))
+            self.refresh()
+        except Exception as e:
+            logging.exception(f'Error updating stock from AdminFrame: {e}')
+            messagebox.showerror('Error', 'No se pudo actualizar el inventario')
+
+    def show_access_logs(self):
+        rows = self.db.fetch_all('SELECT id, user_id, username, action, details, created_at FROM access_logs ORDER BY id DESC LIMIT 500')
+        win = tk.Toplevel(self)
+        win.title('Registros de acceso')
+        cols = ('id', 'user_id', 'username', 'action', 'details', 'created_at')
+        tree = ttk.Treeview(win, columns=cols, show='headings')
+        for c in cols:
+            tree.heading(c, text=c.upper())
+        tree.pack(fill='both', expand=True)
         for r in rows:
-            card = tk.Frame(self.inv_list, bg='white', bd=1, relief='solid', padx=8, pady=8)
-            card.pack(fill='x', pady=6)
-            left = tk.Frame(card, bg='white')
-            left.pack(side='left')
-            tk.Label(left, text=r[1], font=(None, 12, 'bold'), bg='white').pack()
-            right = tk.Frame(card, bg='white')
-            right.pack(side='right')
-            tk.Label(right, text=f"{r[2]} {r[3]}", bg='white').pack()
-            tk.Button(right, text='+1', command=lambda id=r[0]: self.add_stock(id, 1), bg=OK).pack()
+            tree.insert('', 'end', values=r)
 
 
 class LoginWindow(tk.Toplevel):
