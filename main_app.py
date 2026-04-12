@@ -341,15 +341,18 @@ class POSFrame(tk.Frame):
         if not self.cart:
             messagebox.showinfo('Aviso', 'El carrito está vacío')
             return
-        # Inserta pedido simple
-        items = ','.join([p[1] for p in self.cart])
+        # Inserta pedido con totales calculados y items estructurados
+        items_list = [{'id': p[0], 'nombre': p[1], 'precio': p[2]} for p in self.cart]
+        items = json.dumps(items_list, ensure_ascii=False)
+        subtotal = sum((p.get('precio') or 0) for p in items_list)
+        total = subtotal
         try:
             numero = f"POS-{datetime.now().strftime('%Y%m%d%H%M%S')}"
             created_at = datetime.now().isoformat()
             usuario_id = self.user.get('id') if self.user else None
             sesion_id = self.session_id
             self.db.execute('INSERT INTO pedidos (numero, items, subtotal, total, estado, canal, usuario_id, sesion_id, created_at) VALUES (?,?,?,?,?,?,?,?,?)',
-                            (numero, items, 0, 0, 'RECIBIDO', 'CAJA', usuario_id, sesion_id, created_at))
+                            (numero, items, subtotal, total, 'RECIBIDO', 'CAJA', usuario_id, sesion_id, created_at))
             messagebox.showinfo('OK', 'Pedido procesado')
         except Exception as e:
             logging.error(f'Error procesando pedido POS: {e}')
@@ -378,28 +381,49 @@ class POSFrame(tk.Frame):
         if not self.session_id:
             messagebox.showwarning('Caja', 'No hay sesión de caja abierta')
             return
-        # calcular totales de esta sesion
-        rows = self.db.fetch_all('SELECT id, items FROM pedidos WHERE sesion_id = ? AND canal = ?', (self.session_id, 'CAJA'))
-        total = 0.0
-        detalles = []
-        for r in rows:
-            detalles.append(f"Pedido #{r[0]}: {r[1]}")
-        total = len(rows)
+        # calcular totales de esta sesion y formatear reporte monoespaciado
         cierre_at = datetime.now().isoformat()
+        rows = self.db.fetch_all('SELECT id, numero, total, items FROM pedidos WHERE sesion_id = ? AND canal = ?', (self.session_id, 'CAJA'))
+        detalles = []
+        sum_total = 0.0
+        for r in rows:
+            pid = r[0]
+            numero = r[1]
+            total_p = float(r[2] or 0)
+            sum_total += total_p
+            try:
+                items_obj = json.loads(r[3]) if r[3] else []
+                item_names = ', '.join([it.get('nombre') for it in items_obj])
+            except Exception:
+                item_names = (r[3] or '')[:60]
+            detalles.append((pid, numero, total_p, item_names))
+
+        # fetch inicio and inicial
+        caja_row = self.db.fetch_one('SELECT inicial, inicio FROM caja_sesiones WHERE id = ?', (self.session_id,)) or (0.0, '')
+        inicial = float(caja_row[0] or 0)
+        inicio_ts = caja_row[1] or ''
+
         try:
-            self.db.execute('UPDATE caja_sesiones SET estado = ?, cierre_total = ?, cierre_at = ? WHERE id = ?', ('CERRADO', total, cierre_at, self.session_id))
+            self.db.execute('UPDATE caja_sesiones SET estado = ?, cierre_total = ?, cierre_at = ? WHERE id = ?', ('CERRADO', sum_total, cierre_at, self.session_id))
         except Exception:
             logging.exception('Error cerrando caja')
-        report_lines = []
-        report_lines.append('Cierre de Caja Report')
-        report_lines.append(f'Caja ID: {self.session_id}')
-        report_lines.append(f'Usuario: {self.user.get("username") if self.user else ""}')
-        report_lines.append(f'Inicio: {cierre_at}')
-        report_lines.append('---')
-        report_lines.extend(detalles)
-        report_lines.append('---')
-        report_lines.append(f'Total pedidos: {total}')
-        report_text = '\n'.join(report_lines)
+
+        # Build monospaced report
+        lines = []
+        lines.append('***** CIERRE DE CAJA *****')
+        lines.append(f'Caja ID: {self.session_id}    Usuario: {self.user.get("username") if self.user else ""}')
+        lines.append(f'Inicio: {inicio_ts}')
+        lines.append(f'Cierre: {cierre_at}')
+        lines.append('')
+        lines.append(f'Inicial: {inicial:0.2f}')
+        lines.append('-' * 80)
+        lines.append(f'{"Pedido":<6}{"Numero":<22}{"Total":>12}  Items')
+        lines.append('-' * 80)
+        for d in detalles:
+            lines.append(f'{d[0]:<6}{d[1]:<22}{d[2]:>12.2f}  {d[3]}')
+        lines.append('-' * 80)
+        lines.append(f'TOTALES: {sum_total:0.2f}')
+        report_text = '\n'.join(lines)
         # show report in products_frame (replace content temporarily)
         self.show_report(report_text)
         # attempt to print by saving to temp file and using os.startfile on Windows
