@@ -2094,3 +2094,24 @@ Traceback (most recent call last):
     self.refresh()
     ^^^^^^^^^^^^
 AttributeError: 'AdminFrame' object has no attribute 'refresh'
+2026-04-11 23:11:18,708 - ERROR - Uncaught exception
+Traceback (most recent call last):
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\main_app.py", line 1052, in <module>
+    app = App()
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\main_app.py", line 724, in __init__
+    self.build()
+    ~~~~~~~~~~^^
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\main_app.py", line 799, in build
+    kds_tab = KDSFrame(self.notebook, self.db, user=self.user)
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\main_app.py", line 458, in __init__
+    super().__init__(parent, bg='#071026', *args, **kwargs)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.3312.0_x64__qbz5n2kfra8p0\Lib\tkinter\__init__.py", line 3354, in __init__
+    Widget.__init__(self, master, 'frame', cnf, {}, extra)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.3312.0_x64__qbz5n2kfra8p0\Lib\tkinter\__init__.py", line 2791, in __init__
+    self.tk.call(
+    ~~~~~~~~~~~~^
+        (widgetName, self._w) + extra + self._options(cnf))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_tkinter.TclError: unknown option "-user"

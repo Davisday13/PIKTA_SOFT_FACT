@@ -455,8 +455,11 @@ class POSFrame(tk.Frame):
 
 class KDSFrame(tk.Frame):
     def __init__(self, parent, db: DatabaseManager, *args, **kwargs):
+        # accept optional user kwarg to avoid passing unknown options to tk.Frame
+        user = kwargs.pop('user', None)
         super().__init__(parent, bg='#071026', *args, **kwargs)
         self.db = db
+        self.user = user
         tk.Label(self, text='KDS - Cocina', bg='#071026', fg='white', font=(None, 16, 'bold')).pack(anchor='w', padx=12, pady=8)
         kds_img = load_image(os.path.join('Imagenes', 'cocina.jpeg'), size=(40,40)) or load_image(os.path.join('Imagenes', 'cocina.png'), size=(40,40))
         if kds_img:
