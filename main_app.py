@@ -22,9 +22,25 @@ import json
 import os
 from datetime import datetime
 import logging
+import sys
 
-logging.basicConfig(filename='error_log.txt', level=logging.ERROR,
+logging.basicConfig(filename='error_log.txt', filemode='a', level=logging.ERROR,
                     format='%(asctime)s - %(levelname)s - %(message)s')
+
+
+# Global exception handlers: ensure all uncaught exceptions end up in error_log.txt
+def _log_uncaught_exceptions(exc_type, exc_value, exc_traceback):
+    if issubclass(exc_type, KeyboardInterrupt):
+        sys.__excepthook__(exc_type, exc_value, exc_traceback)
+        return
+    logging.error('Uncaught exception', exc_info=(exc_type, exc_value, exc_traceback))
+
+sys.excepthook = _log_uncaught_exceptions
+
+def _tk_report_callback_exception(self, exc, val, tb):
+    logging.error('Tkinter callback exception', exc_info=(exc, val, tb))
+
+tk.Tk.report_callback_exception = _tk_report_callback_exception
 
 # Nombre real de la base de datos en el repo
 DB_NAME = "PIk'TADB.db"
@@ -157,6 +173,16 @@ class DatabaseManager:
                 except Exception as e:
                     logging.error(f"Seed usuarios error: {e}")
 
+            # Tabla de registros de acceso (login/logout/acciones)
+            cur.execute('''CREATE TABLE IF NOT EXISTS access_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                username TEXT,
+                action TEXT,
+                details TEXT,
+                created_at TEXT
+            )''')
+
             conn.commit()
 
     def _ensure_column(self, table, column, col_type):
@@ -172,6 +198,16 @@ class DatabaseManager:
             except Exception as e:
                 logging.error(f"Error adding column {column} to {table}: {e}")
 
+    def log_access(self, user_id, username, action, details=''):
+        try:
+            with self.get_connection() as conn:
+                cur = conn.cursor()
+                cur.execute('INSERT INTO access_logs (user_id, username, action, details, created_at) VALUES (?,?,?,?,?)',
+                            (user_id, username, action, details, datetime.now().isoformat()))
+                conn.commit()
+        except Exception as e:
+            logging.exception(f'Error logging access: {e}')
+
     def fetch_all(self, query, params=()):
         with self.get_connection() as conn:
             cur = conn.cursor()
@@ -185,11 +221,184 @@ class DatabaseManager:
             return cur.fetchone()
 
     def execute(self, query, params=()):
-        with self.get_connection() as conn:
-            cur = conn.cursor()
-            cur.execute(query, params)
-            conn.commit()
-            return cur
+        try:
+            with self.get_connection() as conn:
+                cur = conn.cursor()
+                cur.execute(query, params)
+                conn.commit()
+                return cur
+        except Exception as e:
+            logging.exception(f'DB execute error: {e} - Query: {query} - Params: {params}')
+            raise
+
+
+class POSFrame(tk.Frame):
+    def __init__(self, parent, db: DatabaseManager, *args, **kwargs):
+        super().__init__(parent, bg='#0B1220', *args, **kwargs)
+        self.db = db
+        self.cart = []
+        header = tk.Label(self, text='Punto de Venta', bg='#0B1220', fg='white', font=(None, 16, 'bold'))
+        header.pack(anchor='w', padx=12, pady=8)
+
+        body = tk.Frame(self, bg='#0B1220')
+        body.pack(fill='both', expand=True, padx=12, pady=6)
+
+        self.products_frame = tk.Frame(body, bg='#0B1220')
+        self.products_frame.pack(side='left', fill='both', expand=True)
+
+        self.cart_frame = tk.Frame(body, bg='#0B1220')
+        self.cart_frame.pack(side='right', fill='y')
+
+        tk.Label(self.cart_frame, text='Carrito', bg='#0B1220', fg='white').pack(pady=6)
+        self.cart_list = tk.Listbox(self.cart_frame, width=30)
+        self.cart_list.pack(padx=6, pady=6)
+        tk.Button(self.cart_frame, text='Procesar', command=self.process_order, bg='#0ea5e9', fg='white').pack(pady=6)
+
+        self.render_products()
+
+    def render_products(self):
+        for w in self.products_frame.winfo_children():
+            w.destroy()
+        rows = self.db.fetch_all('SELECT id, nombre, precio FROM productos_menu')
+        if not rows:
+            tk.Label(self.products_frame, text='No hay productos', bg='#0B1220', fg='#9CA3AF').pack()
+            return
+        for pid, nombre, precio in rows:
+            f = tk.Frame(self.products_frame, bg='#0B1220')
+            f.pack(fill='x', pady=4)
+            tk.Label(f, text=f"{nombre} - {precio}", bg='#0B1220', fg='white').pack(side='left')
+            tk.Button(f, text='+', command=lambda p=(pid, nombre, precio): self.add_product(p), bg='#34d399').pack(side='right')
+
+    def add_product(self, product):
+        self.cart.append(product)
+        self.cart_list.insert('end', f"{product[1]} - {product[2]}")
+
+    def process_order(self):
+        if not self.cart:
+            messagebox.showinfo('Aviso', 'El carrito está vacío')
+            return
+        # Inserta pedido simple
+        items = ','.join([p[1] for p in self.cart])
+        try:
+            self.db.execute('INSERT INTO pedidos (numero, items, subtotal, total, estado, canal) VALUES (?,?,?,?,?,?)',
+                            (f"POS-{datetime.now().strftime('%Y%m%d%H%M%S')}", items, 0, 0, 'RECIBIDO', 'CAJA'))
+            messagebox.showinfo('OK', 'Pedido procesado')
+        except Exception as e:
+            logging.error(f'Error procesando pedido POS: {e}')
+            messagebox.showerror('Error', 'No se pudo crear el pedido')
+        self.cart.clear()
+        self.cart_list.delete(0, 'end')
+
+
+class KDSFrame(tk.Frame):
+    def __init__(self, parent, db: DatabaseManager, *args, **kwargs):
+        super().__init__(parent, bg='#071026', *args, **kwargs)
+        self.db = db
+        tk.Label(self, text='KDS - Cocina', bg='#071026', fg='white', font=(None, 16, 'bold')).pack(anchor='w', padx=12, pady=8)
+        self.listbox = tk.Listbox(self, height=20, width=60)
+        self.listbox.pack(padx=12, pady=8)
+        btns = tk.Frame(self, bg='#071026')
+        btns.pack()
+        tk.Button(btns, text='Refrescar', command=self.refresh, bg='#60a5fa').pack(side='left', padx=6)
+        tk.Button(btns, text='Marcar listo', command=self.mark_ready, bg='#34d399').pack(side='left', padx=6)
+        self.refresh()
+
+    def refresh(self):
+        self.listbox.delete(0, 'end')
+        rows = self.db.fetch_all("SELECT id, numero, items, estado FROM pedidos WHERE estado!='listo' ORDER BY id DESC LIMIT 50")
+        for r in rows:
+            short = (r[2][:80] + '...') if r[2] and len(r[2]) > 80 else (r[2] or '')
+            self.listbox.insert('end', f"#{r[0]} - {short} ({r[3]})")
+
+    def mark_ready(self):
+        sel = self.listbox.curselection()
+        if not sel:
+            return
+        text = self.listbox.get(sel[0])
+        pid = int(text.split()[0].lstrip('#'))
+        self.db.execute('UPDATE pedidos SET estado=? WHERE id=?', ('listo', pid))
+        self.refresh()
+
+
+class AdminFrame(tk.Frame):
+    def __init__(self, parent, db: DatabaseManager, *args, **kwargs):
+        super().__init__(parent, bg='#0b1220', *args, **kwargs)
+        self.db = db
+        tk.Label(self, text='Admin - Usuarios', bg='#0b1220', fg='white', font=(None, 16, 'bold')).pack(anchor='w', padx=12, pady=8)
+
+        main = tk.Frame(self, bg='#0b1220')
+        main.pack(fill='both', expand=True, padx=12, pady=6)
+
+        left = tk.Frame(main, bg='#0b1220')
+        left.pack(side='left', fill='both', expand=True)
+
+        right = tk.Frame(main, bg='#0b1220')
+        right.pack(side='right', fill='y')
+
+        # Users list
+        self.tree = ttk.Treeview(left, columns=('id', 'username', 'rol', 'nombre'), show='headings')
+        self.tree.heading('id', text='ID')
+        self.tree.heading('username', text='Usuario')
+        self.tree.heading('rol', text='Rol')
+        self.tree.heading('nombre', text='Nombre')
+        self.tree.pack(fill='both', expand=True)
+
+        # Form to create user
+        tk.Label(right, text='Crear usuario', bg='#0b1220', fg='white').pack(pady=6)
+        tk.Label(right, text='Usuario', bg='#0b1220', fg='white').pack(anchor='w')
+        self.e_user = tk.Entry(right)
+        self.e_user.pack()
+        tk.Label(right, text='Password', bg='#0b1220', fg='white').pack(anchor='w')
+        self.e_pass = tk.Entry(right, show='*')
+        self.e_pass.pack()
+        tk.Label(right, text='Rol', bg='#0b1220', fg='white').pack(anchor='w')
+        self.e_rol = tk.Entry(right)
+        self.e_rol.pack()
+        tk.Label(right, text='Nombre', bg='#0b1220', fg='white').pack(anchor='w')
+        self.e_nombre = tk.Entry(right)
+        self.e_nombre.pack()
+        tk.Button(right, text='Crear', command=self.create_user, bg='#60a5fa').pack(pady=8)
+        tk.Button(right, text='Ver accesos', command=self.show_access_logs, bg='#6366f1', fg='white').pack(pady=6)
+
+        self.refresh()
+
+    def refresh(self):
+        for r in self.tree.get_children():
+            self.tree.delete(r)
+        rows = self.db.fetch_all('SELECT id, username, rol, nombre_completo FROM usuarios')
+        for row in rows:
+            self.tree.insert('', 'end', values=row)
+
+    def create_user(self):
+        username = self.e_user.get().strip()
+        password = self.e_pass.get().strip()
+        rol = self.e_rol.get().strip() or 'Cajera'
+        nombre = self.e_nombre.get().strip() or username
+        if not username or not password:
+            messagebox.showwarning('Falta', 'Usuario y password son obligatorios')
+            return
+        try:
+            self.db.execute('INSERT INTO usuarios (username, password, rol, nombre_completo) VALUES (?, ?, ?, ?)', (username, password, rol, nombre))
+            messagebox.showinfo('OK', 'Usuario creado')
+            self.e_user.delete(0, 'end')
+            self.e_pass.delete(0, 'end')
+            self.e_rol.delete(0, 'end')
+            self.e_nombre.delete(0, 'end')
+            self.refresh()
+        except Exception as e:
+            messagebox.showerror('Error', str(e))
+
+    def show_access_logs(self):
+        rows = self.db.fetch_all('SELECT id, user_id, username, action, details, created_at FROM access_logs ORDER BY id DESC LIMIT 500')
+        win = tk.Toplevel(self)
+        win.title('Registros de acceso')
+        cols = ('id', 'user_id', 'username', 'action', 'details', 'created_at')
+        tree = ttk.Treeview(win, columns=cols, show='headings')
+        for c in cols:
+            tree.heading(c, text=c.upper())
+        tree.pack(fill='both', expand=True)
+        for r in rows:
+            tree.insert('', 'end', values=r)
 
 
 class LoginWindow(tk.Toplevel):
@@ -200,9 +409,10 @@ class LoginWindow(tk.Toplevel):
         self.db = db
         self.user = None
         self.title('Login')
-        self.geometry('380x220')
+        # ventana de login más grande y centrada
         self.resizable(False, False)
         self.configure(bg=BG)
+        center_window(self, 520, 320)
         self.grab_set()
 
         # logo (pikata)
@@ -215,10 +425,10 @@ class LoginWindow(tk.Toplevel):
         frm = tk.Frame(self, bg=BG)
         frm.pack(padx=12, pady=6, fill='x')
         tk.Label(frm, text='Usuario', bg=BG, fg=FG).grid(row=0, column=0, sticky='w')
-        self.username = tk.Entry(frm)
+        self.username = tk.Entry(frm, width=28)
         self.username.grid(row=0, column=1, sticky='ew')
         tk.Label(frm, text='Contraseña', bg=BG, fg=FG).grid(row=1, column=0, sticky='w')
-        self.password = tk.Entry(frm, show='*')
+        self.password = tk.Entry(frm, show='*', width=28)
         self.password.grid(row=1, column=1, sticky='ew')
         frm.columnconfigure(1, weight=1)
 
@@ -226,6 +436,11 @@ class LoginWindow(tk.Toplevel):
         btnf.pack(pady=10)
         tk.Button(btnf, text='Entrar', bg=ACCENT, fg='white', command=self.try_login).pack(side='left', padx=6)
         tk.Button(btnf, text='Cancelar', command=self.cancel).pack(side='left', padx=6)
+
+        # accesibilidad teclado: Enter = login, Escape = cancelar, Tab navegación natural
+        self.username.focus_set()
+        self.bind('<Return>', lambda e: self.try_login())
+        self.bind('<Escape>', lambda e: self.cancel())
 
     def try_login(self):
         u = self.username.get().strip()
@@ -238,6 +453,11 @@ class LoginWindow(tk.Toplevel):
             messagebox.showerror('Error', 'Usuario o contraseña incorrectos')
             return
         self.user = {'id': row[0], 'username': row[1], 'rol': row[2], 'nombre_completo': row[3]}
+        try:
+            # Registrar acceso
+            self.db.log_access(self.user['id'], self.user['username'], 'login')
+        except Exception:
+            logging.exception('Error registrando login')
         self.destroy()
 
     def cancel(self):
@@ -273,54 +493,68 @@ class App(tk.Tk):
         tk.Label(header, text=f"Bienvenido {self.user.get('nombre_completo')}", bg=BG, fg=FG, font=(None, 12)).pack()
         tk.Label(header, text='Sistema Restaurante', bg=BG, fg=FG, font=(None, 22, 'bold')).pack()
 
-        # Grid de tarjetas (simulador, POS, KDS, Admin) con imágenes
-        cards = tk.Frame(self, bg=BG)
-        cards.pack(pady=18, padx=20, fill='x')
-
-        # helper para crear una tarjeta
-        def make_card(parent, img_path, title, desc, cmd=None):
-            card = tk.Frame(parent, bg=PANEL, bd=0, relief='raised', padx=18, pady=18)
-            card.pack(side='left', expand=True, fill='both', padx=12)
-            img = load_image(os.path.join('Imagenes', img_path), size=(96, 96)) if img_path else None
-            if img:
-                lbl = tk.Label(card, image=img, bg=PANEL)
-                lbl.image = img
-                lbl.pack(pady=6)
-            tk.Label(card, text=title, bg=PANEL, fg=FG, font=(None, 14, 'bold')).pack(pady=6)
-            tk.Label(card, text=desc, bg=PANEL, fg='#9CA3AF', wraplength=220, justify='center').pack(pady=6)
-            if cmd:
-                btn = tk.Button(card, text='Abrir', command=cmd, bg=ACCENT, fg='white')
-                btn.pack(pady=8)
-            return card
+        # En lugar de abrir nuevas ventanas, creamos un Notebook (una sola ventana con pestañas)
+        self.notebook = ttk.Notebook(self)
+        self.notebook.pack(fill='both', expand=True, padx=12, pady=12)
 
         role = self.user.get('rol', '').lower()
-        # Simulador (no implementado funcionalmente, solo visual)
-        make_card(cards, 'avion.jpeg', 'Simulador', 'Control total de todos los flujos en una sola vista.', cmd=None)
 
-        # POS
-        pos_cmd = self.open_pos if role in ('administrador', 'admin') or role in ('mesero', 'cajera', 'supervisor') else None
-        make_card(cards, 'pos.png', 'Caja / POS', 'Punto de venta para registro de pedidos presenciales.', cmd=pos_cmd)
+        # Tarjeta "Simulador" - vista informativa (solo visual)
+        sim_frame = tk.Frame(self.notebook, bg=BG)
+        tk.Label(sim_frame, text='Simulador', bg=BG, fg=FG, font=(None, 18, 'bold')).pack(pady=12)
+        tk.Label(sim_frame, text='Control total de todos los flujos en una sola vista.', bg=BG, fg='#9CA3AF').pack()
+        self.notebook.add(sim_frame, text='Simulador')
 
-        # KDS
-        kds_cmd = self.open_kds if role in ('administrador', 'admin') or role in ('cocina',) else None
-        make_card(cards, 'cocina.jpeg', 'Cocina (KDS)', 'Pantalla interactiva para preparación de pedidos.', cmd=kds_cmd)
+        # POS tab
+        if role in ('administrador', 'admin') or role in ('mesero', 'cajera', 'supervisor'):
+            pos_tab = POSFrame(self.notebook, self.db)
+            self.notebook.add(pos_tab, text='Caja / POS')
 
-        # Admin
-        admin_cmd = self.open_admin if role in ('administrador', 'admin', 'supervisor') else None
-        make_card(cards, 'admin.jpeg', 'Admin', 'Métricas, ventas e inventario en tiempo real.', cmd=admin_cmd)
+        # KDS tab
+        if role in ('administrador', 'admin') or role in ('cocina',):
+            kds_tab = KDSFrame(self.notebook, self.db)
+            self.notebook.add(kds_tab, text='Cocina (KDS)')
 
-        tk.Button(self, text='Logout', width=12, command=self.logout, bg=ERR, fg='white').pack(pady=12)
+        # Admin tab
+        if role in ('administrador', 'admin', 'supervisor'):
+            admin_tab = AdminFrame(self.notebook, self.db)
+            self.notebook.add(admin_tab, text='Admin')
+
+        # Logout abajo
+        btn_frame = tk.Frame(self, bg=BG)
+        btn_frame.pack(fill='x')
+        tk.Button(btn_frame, text='Logout', width=12, command=self.logout, bg=ERR, fg='white').pack(pady=6)
+
+        # Global keyboard shortcuts (accesibilidad): Ctrl+P POS, Ctrl+K KDS, Ctrl+A Admin, Ctrl+L Logs
+        self.bind_all('<Control-p>', lambda e: self.open_pos() if role in ('administrador','admin','mesero','cajera','supervisor') else None)
+        self.bind_all('<Control-k>', lambda e: self.open_kds() if role in ('administrador','admin','cocina') else None)
+        self.bind_all('<Control-a>', lambda e: self.open_admin() if role in ('administrador','admin','supervisor') else None)
 
     def open_pos(self):
-        POSWindow(self, self.db)
+        # Selecciona la pestaña POS si existe
+        for i in range(self.notebook.index('end')):
+            if self.notebook.tab(i, 'text') == 'Caja / POS':
+                self.notebook.select(i)
+                return
 
     def open_kds(self):
-        KDSWindow(self, self.db)
+        for i in range(self.notebook.index('end')):
+            if self.notebook.tab(i, 'text') == 'Cocina (KDS)':
+                self.notebook.select(i)
+                return
 
     def open_admin(self):
-        AdminWindow(self, self.db)
+        for i in range(self.notebook.index('end')):
+            if self.notebook.tab(i, 'text') == 'Admin':
+                self.notebook.select(i)
+                return
 
     def logout(self):
+        try:
+            if getattr(self, 'user', None):
+                self.db.log_access(self.user.get('id'), self.user.get('username'), 'logout')
+        except Exception:
+            logging.exception('Error registrando logout')
         self.destroy()
 
 
@@ -360,6 +594,11 @@ class POSWindow(tk.Toplevel):
         self.cart_box.pack(fill='both', expand=True, padx=8, pady=6)
         tk.Button(right, text='Quitar seleccionado', command=self.remove_selected, bg=ERR, fg='white').pack(fill='x', padx=8, pady=4)
         tk.Button(right, text='Confirmar y Enviar', bg=ACCENT, fg='white', command=self.process_order).pack(fill='x', padx=8, pady=8)
+
+        # Key bindings for POS: Enter to confirm order, Delete to remove selected, Up/Down to move selection
+        self.bind_all('<Return>', lambda e: self.process_order() if self.focus_get() and (self.focus_get() in (self.cart_box,)) else None)
+        self.cart_box.bind('<Delete>', lambda e: self.remove_selected())
+        self.cart_box.bind('<Return>', lambda e: None)
 
     def select_category(self, cat):
         self.selected_category.set(cat)
@@ -439,6 +678,11 @@ class KDSWindow(tk.Toplevel):
         tk.Button(btns, text='Marcar COMPLETADO', command=lambda: self.change_status('COMPLETADO'), bg=OK).pack(side='left', padx=6)
         self.poll()
 
+        # KDS keyboard shortcuts: 'p' = PREPARANDO, 'c' = COMPLETADO, F5 refresh
+        self.bind('<p>', lambda e: self.change_status('PREPARANDO'))
+        self.bind('<c>', lambda e: self.change_status('COMPLETADO'))
+        self.bind('<F5>', lambda e: self.refresh())
+
     def poll(self):
         self.refresh()
         self.after(3000, self.poll)
@@ -481,6 +725,10 @@ class AdminWindow(tk.Toplevel):
         self.inv_frame = tk.Frame(right, bg=BG)
         self.inv_frame.pack(fill='both', expand=True, padx=12, pady=12)
         self.load_inventory()
+
+        # Admin keyboard: 'l' = logs, 'r' = refresh inventory
+        self.bind('<l>', lambda e: self.view_logs())
+        self.bind('<r>', lambda e: self.load_inventory())
 
     def view_logs(self):
         win = tk.Toplevel(self)
