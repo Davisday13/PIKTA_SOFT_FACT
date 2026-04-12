@@ -237,37 +237,65 @@ class POSFrame(tk.Frame):
         super().__init__(parent, bg='#0B1220', *args, **kwargs)
         self.db = db
         self.cart = []
-        header = tk.Label(self, text='Punto de Venta', bg='#0B1220', fg='white', font=(None, 16, 'bold'))
-        header.pack(anchor='w', padx=12, pady=8)
+        header = tk.Frame(self, bg='#0B1220')
+        header.pack(fill='x', padx=12, pady=8)
+        tk.Label(header, text='🛒 POS - Punto de Venta Intelligent', bg='#0B1220', fg='white', font=(None, 16, 'bold')).pack(side='left')
 
         body = tk.Frame(self, bg='#0B1220')
         body.pack(fill='both', expand=True, padx=12, pady=6)
 
-        self.products_frame = tk.Frame(body, bg='#0B1220')
-        self.products_frame.pack(side='left', fill='both', expand=True)
+        # Left: products area
+        left = tk.Frame(body, bg='#0B1220')
+        left.pack(side='left', fill='both', expand=True)
 
-        self.cart_frame = tk.Frame(body, bg='#0B1220')
+        # categories
+        self.categories = ['🍔 Combos', '🍟 Extras', '🥤 Bebidas']
+        self.selected_category = tk.StringVar(value=self.categories[0])
+        cat_frame = tk.Frame(left, bg='#0B1220')
+        cat_frame.pack(fill='x', pady=6)
+        for c in self.categories:
+            b = tk.Button(cat_frame, text=c, command=lambda cc=c: self.select_category(cc), bg=PANEL, fg=FG)
+            b.pack(side='left', padx=6)
+
+        self.products_frame = tk.Frame(left, bg='#0B1220')
+        self.products_frame.pack(fill='both', expand=True, pady=6)
+
+        # Right: sidebar carrito (fixed width ~400)
+        self.cart_frame = tk.Frame(body, bg=PANEL, width=400)
         self.cart_frame.pack(side='right', fill='y')
+        self.cart_frame.pack_propagate(False)
+        tk.Label(self.cart_frame, text='Orden Actual', bg=PANEL, fg=FG, font=(None, 14, 'bold')).pack(pady=10)
+        self.cart_list = tk.Listbox(self.cart_frame)
+        self.cart_list.pack(fill='both', expand=True, padx=8, pady=6)
+        tk.Button(self.cart_frame, text='Quitar seleccionado', command=self.remove_selected, bg=ERR, fg='white').pack(fill='x', padx=8, pady=4)
+        tk.Button(self.cart_frame, text='Confirmar y Enviar', bg=ACCENT, fg='white', command=self.process_order).pack(fill='x', padx=8, pady=8)
 
-        tk.Label(self.cart_frame, text='Carrito', bg='#0B1220', fg='white').pack(pady=6)
-        self.cart_list = tk.Listbox(self.cart_frame, width=30)
-        self.cart_list.pack(padx=6, pady=6)
-        tk.Button(self.cart_frame, text='Procesar', command=self.process_order, bg='#0ea5e9', fg='white').pack(pady=6)
-
+        # initial render
         self.render_products()
 
     def render_products(self):
         for w in self.products_frame.winfo_children():
             w.destroy()
-        rows = self.db.fetch_all('SELECT id, nombre, precio FROM productos_menu')
-        if not rows:
-            tk.Label(self.products_frame, text='No hay productos', bg='#0B1220', fg='#9CA3AF').pack()
-            return
-        for pid, nombre, precio in rows:
-            f = tk.Frame(self.products_frame, bg='#0B1220')
-            f.pack(fill='x', pady=4)
-            tk.Label(f, text=f"{nombre} - {precio}", bg='#0B1220', fg='white').pack(side='left')
-            tk.Button(f, text='+', command=lambda p=(pid, nombre, precio): self.add_product(p), bg='#34d399').pack(side='right')
+        products = self.db.fetch_all('SELECT id, nombre, precio, categoria, emoji FROM productos_menu')
+        # filter by category
+        filtered = [p for p in products if (p[3] or '').strip() == self.selected_category.get()] if products else []
+        if not filtered:
+            # fallback sample
+            filtered = [(1, 'Combo Clásico', 5.5, '🍔 Combos', '🍔'), (4, 'Papas fritas', 1.5, '🍟 Extras', '🍟')]
+
+        # grid layout
+        cols = 3
+        for idx, p in enumerate(filtered):
+            r = idx // cols
+            c = idx % cols
+            card = tk.Frame(self.products_frame, bg='white', padx=12, pady=12)
+            card.grid(row=r, column=c, padx=8, pady=8, sticky='n')
+            tk.Label(card, text=p[4] or '🍽', font=(None, 28)).pack()
+            tk.Label(card, text=p[1], font=(None, 10, 'bold')).pack()
+            tk.Label(card, text=f"${p[2]:.2f}", fg=ACCENT, font=(None, 10, 'bold')).pack()
+            tk.Button(card, text='Agregar', command=lambda pid=p: self.add_product(pid), bg=OK, fg='white').pack(pady=6)
+        for i in range(cols):
+            self.products_frame.columnconfigure(i, weight=1)
 
     def add_product(self, product):
         self.cart.append(product)
@@ -324,81 +352,107 @@ class AdminFrame(tk.Frame):
     def __init__(self, parent, db: DatabaseManager, *args, **kwargs):
         super().__init__(parent, bg='#0b1220', *args, **kwargs)
         self.db = db
-        tk.Label(self, text='Admin - Usuarios', bg='#0b1220', fg='white', font=(None, 16, 'bold')).pack(anchor='w', padx=12, pady=8)
+        container = tk.Frame(self, bg='#0b1220')
+        container.pack(fill='both', expand=True)
 
-        main = tk.Frame(self, bg='#0b1220')
-        main.pack(fill='both', expand=True, padx=12, pady=6)
+        sidebar = tk.Frame(container, bg=PANEL, width=260)
+        sidebar.pack(side='left', fill='y')
+        sidebar.pack_propagate(False)
 
-        left = tk.Frame(main, bg='#0b1220')
-        left.pack(side='left', fill='both', expand=True)
+        self.content = tk.Frame(container, bg=BG)
+        self.content.pack(side='right', fill='both', expand=True)
 
-        right = tk.Frame(main, bg='#0b1220')
-        right.pack(side='right', fill='y')
+        tk.Label(sidebar, text='🚀 AdminRest', bg=PANEL, fg='white', font=(None, 14, 'bold')).pack(padx=12, pady=12)
+        menu = [
+            ('dashboard', '📊 Dashboard'),
+            ('menu', '🍔 Menú'),
+            ('inventory', '📦 Inventario'),
+            ('sales', '🧾 Ventas'),
+            ('config', '⚙️ Configuración'),
+            ('users', '👥 Usuarios')
+        ]
+        self.current = tk.StringVar(value='inventory')
+        for mid, label in menu:
+            b = tk.Button(sidebar, text=label, anchor='w', width=24, command=lambda m=mid: self.switch(m), bg=PANEL, fg='white')
+            b.pack(padx=8, pady=6)
 
-        # Users list
-        self.tree = ttk.Treeview(left, columns=('id', 'username', 'rol', 'nombre'), show='headings')
-        self.tree.heading('id', text='ID')
-        self.tree.heading('username', text='Usuario')
-        self.tree.heading('rol', text='Rol')
-        self.tree.heading('nombre', text='Nombre')
-        self.tree.pack(fill='both', expand=True)
+        # frames for content
+        self.frames = {}
+        for key in ('dashboard', 'menu', 'inventory', 'sales', 'config', 'users'):
+            f = tk.Frame(self.content, bg=BG)
+            f.place(relx=0, rely=0, relwidth=1, relheight=1)
+            self.frames[key] = f
 
-        # Form to create user
-        tk.Label(right, text='Crear usuario', bg='#0b1220', fg='white').pack(pady=6)
-        tk.Label(right, text='Usuario', bg='#0b1220', fg='white').pack(anchor='w')
-        self.e_user = tk.Entry(right)
-        self.e_user.pack()
-        tk.Label(right, text='Password', bg='#0b1220', fg='white').pack(anchor='w')
-        self.e_pass = tk.Entry(right, show='*')
-        self.e_pass.pack()
-        tk.Label(right, text='Rol', bg='#0b1220', fg='white').pack(anchor='w')
-        self.e_rol = tk.Entry(right)
-        self.e_rol.pack()
-        tk.Label(right, text='Nombre', bg='#0b1220', fg='white').pack(anchor='w')
-        self.e_nombre = tk.Entry(right)
-        self.e_nombre.pack()
-        tk.Button(right, text='Crear', command=self.create_user, bg='#60a5fa').pack(pady=8)
-        tk.Button(right, text='Ver accesos', command=self.show_access_logs, bg='#6366f1', fg='white').pack(pady=6)
+        # users frame content
+        uf = self.frames['users']
+        tk.Label(uf, text='Usuarios', bg=BG, fg=FG, font=(None, 14, 'bold')).pack(anchor='w', padx=12, pady=6)
+        self.user_tree = ttk.Treeview(uf, columns=('id', 'username', 'rol', 'nombre'), show='headings')
+        for c, h in [('id','ID'),('username','Usuario'),('rol','Rol'),('nombre','Nombre')]:
+            self.user_tree.heading(c, text=h)
+        self.user_tree.pack(fill='both', expand=True, padx=12, pady=6)
+        form = tk.Frame(uf, bg=BG)
+        form.pack(padx=12, pady=6)
+        tk.Label(form, text='Usuario', bg=BG, fg=FG).grid(row=0, column=0, sticky='w')
+        self.e_user = tk.Entry(form)
+        self.e_user.grid(row=0, column=1)
+        tk.Label(form, text='Password', bg=BG, fg=FG).grid(row=1, column=0, sticky='w')
+        self.e_pass = tk.Entry(form, show='*')
+        self.e_pass.grid(row=1, column=1)
+        tk.Label(form, text='Rol', bg=BG, fg=FG).grid(row=2, column=0, sticky='w')
+        self.e_rol = tk.Entry(form)
+        self.e_rol.grid(row=2, column=1)
+        tk.Label(form, text='Nombre', bg=BG, fg=FG).grid(row=3, column=0, sticky='w')
+        self.e_nombre = tk.Entry(form)
+        self.e_nombre.grid(row=3, column=1)
+        tk.Button(form, text='Crear', command=self.create_user, bg='#60a5fa').grid(row=4, column=0, columnspan=2, pady=8)
 
+        # inventory content
+        invf = self.frames['inventory']
+        tk.Label(invf, text='Inventario', bg=BG, fg=FG, font=(None, 14, 'bold')).pack(anchor='w', padx=12, pady=6)
+        self.inv_list = tk.Frame(invf, bg=BG)
+        self.inv_list.pack(fill='both', expand=True, padx=12, pady=6)
+
+        # access logs quick button
+        tk.Button(sidebar, text='Ver accesos', command=self.show_access_logs, bg='#6366f1', fg='white').pack(padx=8, pady=6)
+
+        self.switch('inventory')
         self.refresh()
 
+    def switch(self, key):
+        # bring frame to front
+        for k, f in self.frames.items():
+            if k == key:
+                f.lift()
+        self.current.set(key)
+
     def refresh(self):
-        for r in self.tree.get_children():
-            self.tree.delete(r)
+        # refresh users
+        try:
+            for r in self.user_tree.get_children():
+                self.user_tree.delete(r)
+        except Exception:
+            pass
         rows = self.db.fetch_all('SELECT id, username, rol, nombre_completo FROM usuarios')
         for row in rows:
-            self.tree.insert('', 'end', values=row)
+            self.user_tree.insert('', 'end', values=row)
 
-    def create_user(self):
-        username = self.e_user.get().strip()
-        password = self.e_pass.get().strip()
-        rol = self.e_rol.get().strip() or 'Cajera'
-        nombre = self.e_nombre.get().strip() or username
-        if not username or not password:
-            messagebox.showwarning('Falta', 'Usuario y password son obligatorios')
+        # inventory
+        for w in self.inv_list.winfo_children():
+            w.destroy()
+        rows = self.db.fetch_all('SELECT id, ingrediente, cantidad, unidad, stock_minimo FROM inventario')
+        if not rows:
+            tk.Label(self.inv_list, text='Inventario vacío', bg=BG, fg=FG).pack()
             return
-        try:
-            self.db.execute('INSERT INTO usuarios (username, password, rol, nombre_completo) VALUES (?, ?, ?, ?)', (username, password, rol, nombre))
-            messagebox.showinfo('OK', 'Usuario creado')
-            self.e_user.delete(0, 'end')
-            self.e_pass.delete(0, 'end')
-            self.e_rol.delete(0, 'end')
-            self.e_nombre.delete(0, 'end')
-            self.refresh()
-        except Exception as e:
-            messagebox.showerror('Error', str(e))
-
-    def show_access_logs(self):
-        rows = self.db.fetch_all('SELECT id, user_id, username, action, details, created_at FROM access_logs ORDER BY id DESC LIMIT 500')
-        win = tk.Toplevel(self)
-        win.title('Registros de acceso')
-        cols = ('id', 'user_id', 'username', 'action', 'details', 'created_at')
-        tree = ttk.Treeview(win, columns=cols, show='headings')
-        for c in cols:
-            tree.heading(c, text=c.upper())
-        tree.pack(fill='both', expand=True)
         for r in rows:
-            tree.insert('', 'end', values=r)
+            card = tk.Frame(self.inv_list, bg='white', bd=1, relief='solid', padx=8, pady=8)
+            card.pack(fill='x', pady=6)
+            left = tk.Frame(card, bg='white')
+            left.pack(side='left')
+            tk.Label(left, text=r[1], font=(None, 12, 'bold'), bg='white').pack()
+            right = tk.Frame(card, bg='white')
+            right.pack(side='right')
+            tk.Label(right, text=f"{r[2]} {r[3]}", bg='white').pack()
+            tk.Button(right, text='+1', command=lambda id=r[0]: self.add_stock(id, 1), bg=OK).pack()
 
 
 class LoginWindow(tk.Toplevel):
@@ -499,11 +553,43 @@ class App(tk.Tk):
 
         role = self.user.get('rol', '').lower()
 
-        # Tarjeta "Simulador" - vista informativa (solo visual)
-        sim_frame = tk.Frame(self.notebook, bg=BG)
-        tk.Label(sim_frame, text='Simulador', bg=BG, fg=FG, font=(None, 18, 'bold')).pack(pady=12)
-        tk.Label(sim_frame, text='Control total de todos los flujos en una sola vista.', bg=BG, fg='#9CA3AF').pack()
-        self.notebook.add(sim_frame, text='Simulador')
+        # Home tab: header + 4 cards (simula web/index.html)
+        home = tk.Frame(self.notebook, bg=BG)
+        # Header
+        header_frame = tk.Frame(home, bg=BG)
+        header_frame.pack(pady=6)
+        tk.Label(header_frame, text='🚀 Sistema ', bg=BG, fg=FG, font=(None, 28, 'bold')).pack(side='left')
+        tk.Label(header_frame, text='Restaurante', bg=BG, fg='#3b82f6', font=(None, 28, 'bold')).pack(side='left')
+        tk.Label(home, text='Panel de Control Maestro - Selecciona el módulo para operar', bg=BG, fg='#9CA3AF', font=(None, 10, 'italic')).pack(pady=6)
+
+        cards_wrap = tk.Frame(home, bg=BG)
+        cards_wrap.pack(padx=24, pady=18, fill='both', expand=True)
+
+        def make_card(parent, emoji, title, desc, cmd=None):
+            card = tk.Frame(parent, bg=PANEL, bd=1, relief='flat', padx=24, pady=20)
+            # approximate rounded look via padding and darker inner
+            icon = tk.Label(card, text=emoji, font=(None, 36), bg=PANEL)
+            icon.pack(pady=6)
+            tk.Label(card, text=title, bg=PANEL, fg=FG, font=(None, 14, 'bold')).pack(pady=6)
+            tk.Label(card, text=desc, bg=PANEL, fg='#9CA3AF', wraplength=220, justify='center').pack(pady=6)
+            if cmd:
+                btn = tk.Button(card, text='Abrir', command=cmd, bg=ACCENT, fg='white')
+                btn.pack(pady=8)
+            return card
+
+        # Grid de 4 tarjetas
+        cards = []
+        cards.append(make_card(cards_wrap, '🧠', 'Simulador', 'Control total de todos los flujos en una sola vista.', cmd=lambda: self.notebook.select(0)))
+        cards.append(make_card(cards_wrap, '🛒', 'Caja / POS', 'Punto de venta para registro de pedidos presenciales.', cmd=self.open_pos))
+        cards.append(make_card(cards_wrap, '👨‍🍳', 'Cocina (KDS)', 'Pantalla interactiva para preparación de pedidos.', cmd=self.open_kds))
+        cards.append(make_card(cards_wrap, '📊', 'Admin', 'Métricas, ventas e inventario en tiempo real.', cmd=self.open_admin))
+
+        # arrange cards in a 4-column grid
+        for i, c in enumerate(cards):
+            c.grid(row=0, column=i, padx=12, pady=12, sticky='nsew')
+            cards_wrap.columnconfigure(i, weight=1)
+
+        self.notebook.add(home, text='Home')
 
         # POS tab
         if role in ('administrador', 'admin') or role in ('mesero', 'cajera', 'supervisor'):
