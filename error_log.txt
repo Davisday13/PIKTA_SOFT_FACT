@@ -2236,3 +2236,27 @@ Traceback (most recent call last):
         (widgetName, self._w) + extra + self._options(cnf))
         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 _tkinter.TclError: unknown option "-padding"
+2026-04-12 01:03:16,241 - ERROR - Excepción no capturada
+Traceback (most recent call last):
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\main_app.py", line 1459, in <module>
+    app = App()
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\main_app.py", line 1249, in __init__
+    self.build()
+    ~~~~~~~~~~^^
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\main_app.py", line 1311, in build
+    bg_lbl = ttk.Label(home, image=self.bg_img, opacity=0.1) # Opacidad simulada por color
+  File "C:\Users\DAVIS\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\ttkbootstrap\style.py", line 5288, in __init__
+    func(self, *args, **kwargs)
+    ~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.3312.0_x64__qbz5n2kfra8p0\Lib\tkinter\ttk.py", line 739, in __init__
+    Widget.__init__(self, master, "ttk::label", kw)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.3312.0_x64__qbz5n2kfra8p0\Lib\tkinter\ttk.py", line 534, in __init__
+    tkinter.Widget.__init__(self, master, widgetname, kw=kw)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.3312.0_x64__qbz5n2kfra8p0\Lib\tkinter\__init__.py", line 2791, in __init__
+    self.tk.call(
+    ~~~~~~~~~~~~^
+        (widgetName, self._w) + extra + self._options(cnf))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_tkinter.TclError: unknown option "-opacity"

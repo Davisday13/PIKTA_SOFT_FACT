@@ -1073,9 +1073,9 @@ class LoginWindow(ttk.Toplevel):
         super().__init__(master)
         self.db = db
         self.user = None # Guardará los datos del usuario si el login es exitoso
-        self.title('Login - PIK\'TA SOFT')
+        self.title('Login - SISTEMA POS PIK\'TA')
         self.resizable(False, False)
-        center_window(self, 400, 450)
+        center_window(self, 400, 500)
         self.grab_set() # Bloquea interacción con la ventana principal hasta que se cierre esta
 
         container = ttk.Frame(self, padding=30)
@@ -1104,6 +1104,9 @@ class LoginWindow(ttk.Toplevel):
         # Botones de login y cancelación más grandes
         ttk.Button(container, text='INICIAR SESIÓN', bootstyle="info", command=self.try_login, cursor="hand2", padding=15).pack(fill='x', pady=(25, 10))
         ttk.Button(container, text='Cancelar', bootstyle="secondary-outline", command=self.cancel, cursor="hand2", padding=10).pack(fill='x')
+
+        # Pie de página con Derechos de Autor
+        ttk.Label(container, text='© YAFA SOLUTIONS', font=(None, 10, 'bold'), bootstyle="secondary").pack(pady=(20, 0))
 
         # Configuración de foco inicial y atajos de teclado
         self.username.focus_set()
@@ -1157,14 +1160,15 @@ class App(ttk.Window):
     def __init__(self):
         # Iniciar ventana con el tema 'superhero' que es más moderno y agradable
         super().__init__(themename="superhero")
-        self.title('PIK\'TA SOFT - Sistema de Restaurante')
+        self.withdraw() # Ocultar ventana principal al inicio
+        
+        self.title('SISTEMA POS PIK\'TA - Gestión de Restaurante')
         self.db = DatabaseManager()
         self.user = None
         self.session_token = None
 
         # --- Bucle de Login Persistente ---
         while not self.user:
-            self.withdraw()
             login = LoginWindow(self, self.db)
             self.wait_window(login)
             if getattr(login, 'user', None):
@@ -1176,7 +1180,7 @@ class App(ttk.Window):
                     return
 
         self.deiconify()
-        center_window(self, 1300, 900) # Ventana un poco más grande
+        center_window(self, 1300, 950) # Ventana un poco más grande
         
         # Configurar navegación global por teclado
         self.bind_all('<Return>', self._on_global_return)
@@ -1185,6 +1189,12 @@ class App(ttk.Window):
         self.after(60000, self._check_session_periodically)
         
         self.build()
+        
+        # Pie de página global con Derechos de Autor
+        footer = ttk.Frame(self, bootstyle="secondary", padding=5)
+        footer.pack(fill='x', side='bottom')
+        ttk.Label(footer, text='SISTEMA POS PIK\'TA | Desarrollado por YAFA SOLUTIONS © 2026', 
+                  font=(None, 10, 'bold'), bootstyle="inverse-secondary").pack()
 
     def _check_session_periodically(self):
         """Verifica si la sesión sigue siendo válida."""
@@ -1213,7 +1223,7 @@ class App(ttk.Window):
         user_info = ttk.Frame(header, bootstyle="secondary")
         user_info.pack(side='left')
         ttk.Label(user_info, text=f"Bienvenido(a), {self.user.get('nombre_completo')}", font=(None, 14), bootstyle="inverse-secondary").pack(anchor='w')
-        ttk.Label(user_info, text='SISTEMA PIK\'TA SOFT FACT', font=(None, 26, 'bold'), bootstyle="inverse-secondary").pack(anchor='w')
+        ttk.Label(user_info, text='SISTEMA POS PIK\'TA', font=(None, 26, 'bold'), bootstyle="inverse-secondary").pack(anchor='w')
 
         # Botón para salir (más grande)
         ttk.Button(header, text='Cerrar Sesión', command=self.logout, bootstyle="danger", cursor="hand2", padding=12).pack(side='right', pady=10)
@@ -1233,8 +1243,17 @@ class App(ttk.Window):
         # --- Dashboard (Pestaña Inicial) ---
         home = ttk.Frame(self.notebook, padding=30)
         self.notebook.add(home, text='Inicio')
-        # Aseguramos que el Dashboard sea la pestaña seleccionada al iniciar
         self.notebook.select(home)
+
+        # Logo de Fondo (Marca de Agua)
+        bg_logo_path = os.path.join('Imagenes', 'pikata.png')
+        self.bg_img = load_image(bg_logo_path, size=(400, 400))
+        if self.bg_img:
+            # Crear un Label que contenga el logo y ponerlo al fondo
+            bg_lbl = ttk.Label(home, image=self.bg_img) 
+            bg_lbl.place(relx=0.5, rely=0.5, anchor='center')
+            # Aseguramos que el logo esté detrás de los cuadritos
+            bg_lbl.lower()
 
         cards_wrap = ttk.Frame(home)
         cards_wrap.pack(fill='both', expand=True)
