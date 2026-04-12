@@ -617,25 +617,27 @@ class App(tk.Tk):
 
         role = self.user.get('rol', '').lower()
 
-        # Home tab: header + 4 cards (simula web/index.html)
+        # Home tab: 4 cards (simula web/index.html)
         home = tk.Frame(self.notebook, bg=BG)
-        # Header
-        header_frame = tk.Frame(home, bg=BG)
-        header_frame.pack(pady=6)
-        tk.Label(header_frame, text='🚀 Sistema ', bg=BG, fg=FG, font=(None, 28, 'bold')).pack(side='left')
-        tk.Label(header_frame, text='Restaurante', bg=BG, fg='#3b82f6', font=(None, 28, 'bold')).pack(side='left')
-        tk.Label(home, text='Panel de Control Maestro - Selecciona el módulo para operar', bg=BG, fg='#9CA3AF', font=(None, 10, 'italic')).pack(pady=6)
-
+        # Use the main header (above notebook) so avoid duplicating title here
         cards_wrap = tk.Frame(home, bg=BG)
         cards_wrap.pack(padx=24, pady=18, fill='both', expand=True)
 
-        def make_card(parent, emoji, title, desc, cmd=None):
+        def make_card(parent, img_name, title, desc, cmd=None):
             card = tk.Frame(parent, bg=PANEL, bd=1, relief='flat', padx=24, pady=20)
-            # approximate rounded look via padding and darker inner
-            icon = tk.Label(card, text=emoji, font=(None, 36), bg=PANEL)
-            icon.pack(pady=6)
+            # load image if available
+            img = None
+            if img_name:
+                path = os.path.join('Imagenes', img_name)
+                img = load_image(path, size=(96,96))
+            if img:
+                lbl = tk.Label(card, image=img, bg=PANEL)
+                lbl.image = img
+                lbl.pack(pady=6)
+            else:
+                tk.Label(card, text='🔸', font=(None, 36), bg=PANEL).pack(pady=6)
             tk.Label(card, text=title, bg=PANEL, fg=FG, font=(None, 14, 'bold')).pack(pady=6)
-            tk.Label(card, text=desc, bg=PANEL, fg='#9CA3AF', wraplength=220, justify='center').pack(pady=6)
+            tk.Label(card, text=desc, bg=PANEL, fg='#9CA3AF', wraplength=260, justify='center').pack(pady=6)
             if cmd:
                 btn = tk.Button(card, text='Abrir', command=cmd, bg=ACCENT, fg='white')
                 btn.pack(pady=8)
@@ -643,10 +645,10 @@ class App(tk.Tk):
 
         # Grid de 4 tarjetas
         cards = []
-        cards.append(make_card(cards_wrap, '🧠', 'Simulador', 'Control total de todos los flujos en una sola vista.', cmd=lambda: self.notebook.select(0)))
-        cards.append(make_card(cards_wrap, '🛒', 'Caja / POS', 'Punto de venta para registro de pedidos presenciales.', cmd=self.open_pos))
-        cards.append(make_card(cards_wrap, '👨‍🍳', 'Cocina (KDS)', 'Pantalla interactiva para preparación de pedidos.', cmd=self.open_kds))
-        cards.append(make_card(cards_wrap, '📊', 'Admin', 'Métricas, ventas e inventario en tiempo real.', cmd=self.open_admin))
+        cards.append(make_card(cards_wrap, 'avion.jpeg', 'Simulador', 'Control total de todos los flujos en una sola vista.', cmd=lambda: self.notebook.select(0)))
+        cards.append(make_card(cards_wrap, 'pos.png', 'Caja / POS', 'Punto de venta para registro de pedidos presenciales.', cmd=self.open_pos))
+        cards.append(make_card(cards_wrap, 'cocina.jpeg', 'Cocina (KDS)', 'Pantalla interactiva para preparación de pedidos.', cmd=self.open_kds))
+        cards.append(make_card(cards_wrap, 'admin.jpeg', 'Admin', 'Métricas, ventas e inventario en tiempo real.', cmd=self.open_admin))
 
         # arrange cards in a 4-column grid
         for i, c in enumerate(cards):
