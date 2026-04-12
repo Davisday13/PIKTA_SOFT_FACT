@@ -20,10 +20,81 @@ from ttkbootstrap.constants import *
 import sqlite3
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
 import sys
 import tempfile
+import hashlib
+import secrets
+import shutil
+
+# =============================================================================
+# FUNCIONES DE SEGURIDAD (ENCRIPTACIÓN)
+# =============================================================================
+
+def hash_password(password):
+    """Genera un hash seguro para la contraseña usando PBKDF2."""
+    salt = secrets.token_hex(16)
+    hash_obj = hashlib.pbkdf2_hmac('sha256', password.encode(), salt.encode(), 100000)
+    return f"{salt}:{hash_obj.hex()}"
+
+def verify_password(stored_password, provided_password):
+    """Verifica si la contraseña proporcionada coincide con el hash guardado."""
+    if not stored_password or ':' not in stored_password:
+        return False
+    try:
+        salt, hash_value = stored_password.split(':')
+        hash_obj = hashlib.pbkdf2_hmac('sha256', provided_password.encode(), salt.encode(), 100000)
+        return hash_obj.hex() == hash_value
+    except Exception:
+        return False
+
+# =============================================================================
+# GESTOR DE SESIONES
+# =============================================================================
+
+class SessionManager:
+    """Gestiona las sesiones activas de los usuarios y su tiempo de expiración."""
+    def __init__(self, timeout_seconds=1800): # 30 minutos por defecto
+        self.sessions = {}
+        self.session_timeout = timeout_seconds
+    
+    def create_session(self, user_data):
+        """Crea una nueva sesión y devuelve el ID único."""
+        session_id = secrets.token_urlsafe(32)
+        self.sessions[session_id] = {
+            'user': user_data,
+            'created_at': datetime.now(),
+            'last_activity': datetime.now()
+        }
+        return session_id
+    
+    def validate_session(self, session_id):
+        """Verifica si la sesión es válida y no ha expirado."""
+        if session_id not in self.sessions:
+            return False
+        session = self.sessions[session_id]
+        # Verificar expiración por inactividad
+        if (datetime.now() - session['last_activity']).total_seconds() > self.session_timeout:
+            del self.sessions[session_id]
+            return False
+        # Actualizar última actividad
+        session['last_activity'] = datetime.now()
+        return True
+
+    def get_user(self, session_id):
+        """Retorna los datos del usuario de una sesión activa."""
+        if self.validate_session(session_id):
+            return self.sessions[session_id]['user']
+        return None
+
+    def close_session(self, session_id):
+        """Elimina una sesión activa."""
+        if session_id in self.sessions:
+            del self.sessions[session_id]
+
+# Instancia global del gestor de sesiones
+session_manager = SessionManager()
 
 # =============================================================================
 # CONFIGURACIÓN DE REGISTRO DE ERRORES (LOGGING)
@@ -120,7 +191,7 @@ class DatabaseManager:
         with self.get_connection() as conn:
             cur = conn.cursor()
             
-            # Creación de tabla de usuarios (Administradores, Cajeros, Cocineros, etc.)
+            # Creación de tabla de usuarios
             cur.execute('''CREATE TABLE IF NOT EXISTS usuarios (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT UNIQUE NOT NULL,
@@ -129,7 +200,7 @@ class DatabaseManager:
                 nombre_completo TEXT
             )''')
 
-            # Creación de tabla de productos del menú (lo que se vende en el POS)
+            # Creación de tabla de productos del menú
             cur.execute('''CREATE TABLE IF NOT EXISTS productos_menu (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 nombre TEXT NOT NULL,
@@ -140,7 +211,7 @@ class DatabaseManager:
                 disponible BOOLEAN DEFAULT 1
             )''')
 
-            # Creación de tabla de pedidos (historial de ventas y órdenes activas)
+            # Creación de tabla de pedidos
             cur.execute('''CREATE TABLE IF NOT EXISTS pedidos (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 numero TEXT UNIQUE NOT NULL,
@@ -161,7 +232,7 @@ class DatabaseManager:
                 created_at TEXT
             )''')
 
-            # Creación de tabla de inventario (materia prima e ingredientes)
+            # Creación de tabla de inventario
             cur.execute('''CREATE TABLE IF NOT EXISTS inventario (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 ingrediente TEXT NOT NULL UNIQUE,
@@ -170,7 +241,19 @@ class DatabaseManager:
                 stock_minimo REAL NOT NULL DEFAULT 0
             )''')
 
-            # Migraciones: Asegurar que las columnas nuevas existan en bases de datos antiguas
+            # Creación de tabla de auditoría (Registro de cambios en datos)
+            cur.execute('''CREATE TABLE IF NOT EXISTS auditoria (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tabla TEXT NOT NULL,
+                accion TEXT NOT NULL,
+                usuario TEXT,
+                detalles TEXT,
+                datos_previos TEXT,
+                datos_nuevos TEXT,
+                fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )''')
+
+            # Migraciones: Asegurar columnas nuevas
             self._ensure_column('productos_menu', 'categoria', 'TEXT')
             self._ensure_column('productos_menu', 'emoji', 'TEXT')
             self._ensure_column('pedidos', 'canal', 'TEXT')
@@ -178,7 +261,17 @@ class DatabaseManager:
             self._ensure_column('pedidos', 'sesion_id', 'INTEGER')
             self._ensure_column('pedidos', 'created_at', 'TEXT')
 
-            # Usuarios por defecto para la primera ejecución
+            # Migración de contraseñas a formato hash si es necesario
+            cur.execute("SELECT id, username, password FROM usuarios")
+            users = cur.fetchall()
+            for uid, uname, pwd in users:
+                # Si la contraseña no tiene el formato de hash (no contiene ':'), encriptarla
+                if ':' not in pwd:
+                    new_pwd = hash_password(pwd)
+                    cur.execute("UPDATE usuarios SET password = ? WHERE id = ?", (new_pwd, uid))
+                    logging.info(f"Contraseña migrada a hash para usuario: {uname}")
+
+            # Usuarios por defecto (con contraseñas ya encriptadas)
             seeds = [
                 ("Davis", "1234", "Administrador", "Davis Admin"),
                 ("Rommel", "1234", "Supervisor", "Rommel Supervisor"),
@@ -189,7 +282,11 @@ class DatabaseManager:
             ]
             for u, p, r, n in seeds:
                 try:
-                    cur.execute('INSERT OR IGNORE INTO usuarios (username, password, rol, nombre_completo) VALUES (?,?,?,?)', (u, p, r, n))
+                    # Buscar si el usuario ya existe
+                    cur.execute('SELECT id FROM usuarios WHERE username = ?', (u,))
+                    if not cur.fetchone():
+                        hashed_p = hash_password(p)
+                        cur.execute('INSERT INTO usuarios (username, password, rol, nombre_completo) VALUES (?,?,?,?)', (u, hashed_p, r, n))
                 except Exception as e:
                     logging.error(f"Error al insertar usuario base: {e}")
 
@@ -216,6 +313,43 @@ class DatabaseManager:
             )''')
 
             conn.commit()
+
+    def audit_log(self, tabla, accion, usuario=None, detalles='', prev=None, new=None):
+        """Registra un evento en la tabla de auditoría."""
+        try:
+            with self.get_connection() as conn:
+                cur = conn.cursor()
+                cur.execute('''INSERT INTO auditoria (tabla, accion, usuario, detalles, datos_previos, datos_nuevos) 
+                             VALUES (?,?,?,?,?,?)''',
+                            (tabla, accion, usuario, detalles, 
+                             json.dumps(prev) if prev else None, 
+                             json.dumps(new) if new else None))
+                conn.commit()
+        except Exception as e:
+            logging.error(f"Error en log de auditoría: {e}")
+
+    def create_backup(self):
+        """Crea una copia de seguridad de la base de datos actual."""
+        if not os.path.exists('Backups'):
+            os.makedirs('Backups')
+        
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        backup_path = os.path.join('Backups', f'PIkTA_DB_backup_{timestamp}.db')
+        
+        try:
+            shutil.copy2(self.db_name, backup_path)
+            # Limpiar backups antiguos (mantener solo los últimos 30 días)
+            now = datetime.now()
+            for f in os.listdir('Backups'):
+                f_path = os.path.join('Backups', f)
+                if os.path.isfile(f_path):
+                    f_time = datetime.fromtimestamp(os.path.getctime(f_path))
+                    if (now - f_time).days > 30:
+                        os.remove(f_path)
+            return backup_path
+        except Exception as e:
+            logging.error(f"Error al crear backup: {e}")
+            return None
 
     def _ensure_column(self, table, column, col_type):
         """Función auxiliar para añadir columnas si no existen (idempotente)."""
@@ -433,6 +567,10 @@ class POSFrame(ttk.Frame):
             # Insertar en la base de datos
             self.db.execute('INSERT INTO pedidos (numero, items, subtotal, total, estado, canal, usuario_id, sesion_id, created_at) VALUES (?,?,?,?,?,?,?,?,?)',
                             (numero, items, subtotal, total, 'RECIBIDO', 'CAJA', usuario_id, sesion_id, created_at))
+            
+            # Registrar en auditoría
+            self.db.audit_log('pedidos', 'INSERT', self.user.get('username'), f'Pedido creado: {numero}', new=items_list)
+            
             messagebox.showinfo('Éxito', 'Pedido procesado correctamente')
         except Exception as e:
             logging.error(f'Error al procesar pedido POS: {e}')
@@ -577,63 +715,203 @@ class KDSFrame(ttk.Frame):
 
 class AdminFrame(ttk.Frame):
     """
-    Panel de Administración.
-    Permite gestionar el inventario de ingredientes y la lista de usuarios del sistema.
+    Panel de Administración con sistema de tarjetas similar al principal.
+    Permite gestionar el inventario, usuarios y seguridad.
     """
     def __init__(self, parent, db: DatabaseManager, *args, **kwargs):
         super().__init__(parent, padding=20, *args, **kwargs)
         self.db = db
         
-        # --- Cabecera del Panel Admin con Resaltado ---
-        header = ttk.Frame(self, bootstyle="success", padding=15)
-        header.pack(fill='x', pady=(0, 20))
+        # --- Cabecera del Panel Admin ---
+        self.header = ttk.Frame(self, bootstyle="success", padding=15)
+        self.header.pack(fill='x', pady=(0, 20))
         
         img = load_image(os.path.join('Imagenes', 'admin.jpeg'), size=(60,60))
         if img:
-            lbl = ttk.Label(header, image=img, bootstyle="inverse-success")
+            lbl = ttk.Label(self.header, image=img, bootstyle="inverse-success")
             lbl.image = img
             lbl.pack(side='left', padx=10)
 
-        ttk.Label(header, text='📊 PANEL DE ADMINISTRACIÓN', font=(None, 24, 'bold'), bootstyle="inverse-success").pack(side='left', padx=10)
+        self.title_lbl = ttk.Label(self.header, text='📊 PANEL DE ADMINISTRACIÓN', font=(None, 24, 'bold'), bootstyle="inverse-success")
+        self.title_lbl.pack(side='left', padx=10)
         
-        ttk.Button(header, text='Regresar', command=lambda: self.master.select(0), bootstyle="secondary-outline", cursor="hand2", padding=10).pack(side='right', padx=5)
+        # Botón para regresar al dashboard principal
+        self.btn_back_main = ttk.Button(self.header, text='Regresar', command=lambda: self.master.select(0), bootstyle="light-outline", cursor="hand2", padding=10)
+        self.btn_back_main.pack(side='right', padx=5)
+        
+        # Botón para regresar al "menú de cuadritos" del admin (inicialmente oculto)
+        self.btn_back_admin = ttk.Button(self.header, text='Volver al Admin', command=self.show_admin_menu, bootstyle="light-outline", cursor="hand2", padding=10)
 
-        # --- Sistema de Pestañas Internas ---
-        self.admin_tabs = ttk.Notebook(self, bootstyle="success", takefocus=True)
-        self.admin_tabs.pack(fill='both', expand=True)
+        # --- Contenedor Principal con Notebook Oculto ---
+        self.notebook = ttk.Notebook(self, style='Hidden.TNotebook')
+        self.notebook.pack(fill='both', expand=True)
 
-        # Pestaña 1: Gestión de Inventario
-        self.inv_frame = ttk.Frame(self.admin_tabs, padding=10)
-        self.admin_tabs.add(self.inv_frame, text='Inventario')
+        # 1. Pestaña del Menú de Tarjetas (Cuadritos)
+        self.menu_frame = ttk.Frame(self.notebook, padding=30)
+        self.notebook.add(self.menu_frame, text='Menú Admin')
+        self.setup_admin_menu()
+
+        # 2. Pestaña de Inventario
+        self.inv_frame = ttk.Frame(self.notebook, padding=20)
+        self.notebook.add(self.inv_frame, text='Inventario')
         self.setup_inventory()
 
-        # Pestaña 2: Gestión de Usuarios
-        self.users_frame = ttk.Frame(self.admin_tabs, padding=10)
-        self.admin_tabs.add(self.users_frame, text='Usuarios')
+        # 3. Pestaña de Usuarios
+        self.users_frame = ttk.Frame(self.notebook, padding=20)
+        self.notebook.add(self.users_frame, text='Usuarios')
         self.setup_users()
 
-        # Cargar datos iniciales
+        # 4. Pestaña de Seguridad
+        self.security_frame = ttk.Frame(self.notebook, padding=20)
+        self.notebook.add(self.security_frame, text='Seguridad')
+        self.setup_security()
+
+        self.show_admin_menu() # Mostrar el menú de cuadritos al inicio
+
+    def setup_admin_menu(self):
+        """Crea el dashboard interno de administración con cuadritos e imágenes."""
+        cards_wrap = ttk.Frame(self.menu_frame)
+        cards_wrap.pack(fill='both', expand=True)
+
+        def make_admin_card(parent, img_name, title, desc, cmd, color="success"):
+            # Reutilizamos el estilo de 'pop-out' del dashboard principal
+            card = ttk.Frame(parent, bootstyle="secondary", padding=2, cursor="hand2", takefocus=True, width=220, height=260)
+            card.pack_propagate(False)
+            
+            inner = ttk.Frame(card, padding=10) 
+            inner.pack(fill='both', expand=True)
+
+            # Carga de imagen o emoji por defecto
+            img = None
+            if img_name:
+                path = os.path.join('Imagenes', img_name)
+                img = load_image(path, size=(90, 90))
+            
+            if img:
+                lbl = ttk.Label(inner, image=img)
+                lbl.image = img
+                lbl.pack(pady=10)
+            else:
+                # Si no hay imagen, usar un emoji genérico según el título
+                emoji = '📦'
+                if 'Usuarios' in title: emoji = '👥'
+                if 'Seguridad' in title: emoji = '🛡️'
+                ttk.Label(inner, text=emoji, font=(None, 45)).pack(pady=10)
+
+            ttk.Label(inner, text=title, font=(None, 22, 'bold'), wraplength=200, justify='center').pack(pady=5)
+            ttk.Label(inner, text=desc, wraplength=180, justify='center', font=(None, 12)).pack(pady=5, fill='both', expand=True)
+
+            def on_enter(e):
+                card.configure(bootstyle=color, padding=5)
+                inner.configure(bootstyle="light")
+            def on_leave(e):
+                card.configure(bootstyle="secondary", padding=2)
+                inner.configure(bootstyle="default")
+
+            card.bind("<Enter>", on_enter); card.bind("<Leave>", on_leave)
+            card.bind("<FocusIn>", lambda e: on_enter(None)); card.bind("<FocusOut>", lambda e: on_leave(None))
+            card.bind("<Button-1>", lambda e: cmd())
+            inner.bind("<Button-1>", lambda e: cmd())
+            return card
+
+        # Tarjetas del Admin con sus imágenes correspondientes
+        c1 = make_admin_card(cards_wrap, 'inventario.jpg', 'Inventario', 'Control de stock y materia prima.', lambda: self.open_section(1, "GESTIÓN DE INVENTARIO"))
+        c1.grid(row=0, column=0, padx=20, pady=20)
+
+        c2 = make_admin_card(cards_wrap, 'user.png', 'Usuarios', 'Gestión de personal y accesos.', lambda: self.open_section(2, "GESTIÓN DE USUARIOS"))
+        c2.grid(row=0, column=1, padx=20, pady=20)
+
+        c3 = make_admin_card(cards_wrap, 'seguridad.png', 'Seguridad', 'Auditoría y respaldos de DB.', lambda: self.open_section(3, "SEGURIDAD Y AUDITORÍA"))
+        c3.grid(row=0, column=2, padx=20, pady=20)
+
+        for i in range(3): cards_wrap.columnconfigure(i, weight=1)
+
+    def open_section(self, index, title):
+        """Abre una sección específica y actualiza la cabecera."""
+        self.notebook.select(index)
+        self.title_lbl.config(text=f"📊 {title}")
+        self.btn_back_main.pack_forget() # Ocultar botón principal
+        self.btn_back_admin.pack(side='right', padx=5) # Mostrar botón volver al admin
         self.refresh()
 
+    def show_admin_menu(self):
+        """Vuelve al menú de cuadritos del admin."""
+        self.notebook.select(0)
+        self.title_lbl.config(text='📊 PANEL DE ADMINISTRACIÓN')
+        self.btn_back_admin.pack_forget()
+        self.btn_back_main.pack(side='right', padx=5)
+
+    def refresh(self):
+        """Refresca la sección activa."""
+        try:
+            idx = self.notebook.index('current')
+            if idx == 1: self.refresh_inventory()
+            elif idx == 2: self.refresh_users()
+            elif idx == 3: self.refresh_security()
+        except: pass
+
     def setup_inventory(self):
-        """Prepara la estructura visual de la sección de inventario."""
-        self.inv_list_frame = ttk.Frame(self.inv_frame)
-        self.inv_list_frame.pack(fill='both', expand=True)
-        ttk.Button(self.inv_frame, text='Actualizar Inventario', command=self.refresh_inventory, bootstyle="success-outline").pack(pady=10)
+        """Prepara la estructura visual de la sección de inventario con una tabla moderna."""
+        # Contenedor superior para controles
+        controls = ttk.Frame(self.inv_frame, padding=(0, 0, 0, 20))
+        controls.pack(fill='x')
+        
+        ttk.Label(controls, text="Control de Materia Prima e Ingredientes", font=(None, 16, 'bold')).pack(side='left')
+        ttk.Button(controls, text='Actualizar Lista', command=self.refresh_inventory, bootstyle="success", padding=10).pack(side='right')
+
+        # Tabla de Inventario (Treeview)
+        cols = ('ID', 'Ingrediente', 'Stock Actual', 'Unidad', 'Mínimo')
+        self.inv_tree = ttk.Treeview(self.inv_frame, columns=cols, show='headings', bootstyle="success", height=15)
+        
+        # Configurar cabeceras y anchos de columna
+        for c in cols:
+            self.inv_tree.heading(c, text=c)
+            self.inv_tree.column(c, anchor='center', width=150)
+        
+        self.inv_tree.column('Ingrediente', anchor='w', width=300)
+        self.inv_tree.pack(fill='both', expand=True)
+
+        # Panel de acciones rápidas (Ajuste de stock)
+        actions = ttk.Labelframe(self.inv_frame, text="Acciones de Ajuste Rápido", padding=15, bootstyle="success")
+        actions.pack(fill='x', pady=(20, 0))
+        
+        ttk.Label(actions, text="Seleccione un ingrediente de la tabla y use los botones para ajustar:", font=(None, 11)).pack(side='left', padx=10)
+        
+        btn_add = ttk.Button(actions, text="Añadir +1", command=lambda: self.adjust_selected_stock(1), bootstyle="success-outline", padding=10, width=15)
+        btn_add.pack(side='left', padx=5)
+        
+        btn_rem = ttk.Button(actions, text="Quitar -1", command=lambda: self.adjust_selected_stock(-1), bootstyle="warning-outline", padding=10, width=15)
+        btn_rem.pack(side='left', padx=5)
+
+    def adjust_selected_stock(self, amount):
+        """Ajusta el stock del elemento seleccionado en la tabla."""
+        sel = self.inv_tree.selection()
+        if not sel:
+            messagebox.showwarning("Aviso", "Por favor, seleccione un ingrediente de la tabla.")
+            return
+        
+        item_id = self.inv_tree.item(sel[0])['values'][0]
+        self.add_stock(item_id, amount)
 
     def setup_users(self):
-        """Prepara la estructura visual de la sección de usuarios."""
+        """Prepara la estructura visual de la sección de usuarios con tabla profesional."""
+        ttk.Label(self.users_frame, text="Gestión de Personal y Accesos", font=(None, 16, 'bold')).pack(anchor='w', pady=(0, 10))
+        
         cols = ('id', 'username', 'rol', 'nombre')
         # Tabla para mostrar usuarios existentes
-        self.user_tree = ttk.Treeview(self.users_frame, columns=cols, show='headings', bootstyle="success", takefocus=True)
-        for c in cols: self.user_tree.heading(c, text=c.capitalize())
+        self.user_tree = ttk.Treeview(self.users_frame, columns=cols, show='headings', bootstyle="success", height=10)
+        for c in cols:
+            self.user_tree.heading(c, text=c.capitalize())
+            self.user_tree.column(c, anchor='center', width=100)
+        
+        self.user_tree.column('nombre', anchor='w', width=250)
         self.user_tree.pack(fill='both', expand=True, pady=10)
         
         # Formulario para agregar nuevos usuarios
-        form = ttk.Labelframe(self.users_frame, text='Nuevo Usuario', bootstyle="success")
+        form = ttk.Labelframe(self.users_frame, text='Registrar Nuevo Usuario', bootstyle="success", padding=15)
         form.pack(fill='x', pady=10)
         
-        inputs = ttk.Frame(form, padding=10)
+        inputs = ttk.Frame(form)
         inputs.pack(fill='x')
         
         ttk.Label(inputs, text='Usuario:').grid(row=0, column=0, padx=5, pady=5)
@@ -660,34 +938,89 @@ class AdminFrame(ttk.Frame):
         """Refresca todas las sub-secciones del panel admin."""
         self.refresh_inventory()
         self.refresh_users()
+        self.refresh_security()
+
+    def setup_security(self):
+        """Configura el panel de seguridad y métricas con un diseño limpio."""
+        # --- Métricas de Seguridad ---
+        metrics_frame = ttk.Labelframe(self.security_frame, text="Estado de Seguridad del Sistema", padding=20, bootstyle="info")
+        metrics_frame.pack(fill='x', pady=(0, 20))
+        
+        # Grid para métricas
+        m_inner = ttk.Frame(metrics_frame)
+        m_inner.pack(fill='x')
+        
+        self.lbl_failed = ttk.Label(m_inner, text="🚨 Intentos fallidos hoy: 0", font=(None, 14), bootstyle="danger")
+        self.lbl_failed.grid(row=0, column=0, padx=30)
+        
+        self.lbl_sessions = ttk.Label(m_inner, text="👥 Sesiones activas: 0", font=(None, 14), bootstyle="info")
+        self.lbl_sessions.grid(row=0, column=1, padx=30)
+        
+        btn_backup = ttk.Button(m_inner, text="💾 Generar Respaldo DB", command=self.manual_backup, bootstyle="success", padding=10)
+        btn_backup.grid(row=0, column=2, padx=30)
+
+        # --- Tabla de Auditoría ---
+        ttk.Label(self.security_frame, text="Historial de Auditoría (Últimas Actividades)", font=(None, 16, 'bold')).pack(anchor='w', pady=15)
+        
+        cols = ('Fecha', 'Usuario', 'Acción', 'Tabla', 'Detalles')
+        self.audit_tree = ttk.Treeview(self.security_frame, columns=cols, show='headings', bootstyle="info", height=12)
+        for c in cols:
+            self.audit_tree.heading(c, text=c)
+            self.audit_tree.column(c, anchor='center', width=120)
+        
+        self.audit_tree.column('Fecha', width=180)
+        self.audit_tree.column('Detalles', anchor='w', width=400)
+        self.audit_tree.pack(fill='both', expand=True)
+
+    def manual_backup(self):
+        """Ejecuta un backup manual desde la interfaz."""
+        path = self.db.create_backup()
+        if path:
+            messagebox.showinfo("Backup Exitoso", f"Copia de seguridad creada en:\n{path}")
+        else:
+            messagebox.showerror("Error", "No se pudo crear la copia de seguridad")
+
+    def refresh_security(self):
+        """Actualiza las métricas y logs de seguridad."""
+        try:
+            # Intentos fallidos hoy
+            today = datetime.now().strftime('%Y-%m-%d')
+            failed = self.db.fetch_one("SELECT COUNT(*) FROM access_logs WHERE action='failed_login' AND created_at LIKE ?", (f"{today}%",))
+            self.lbl_failed.config(text=f"Intentos fallidos hoy: {failed[0] if failed else 0}")
+            
+            # Sesiones activas (del SessionManager global)
+            active = len(session_manager.sessions)
+            self.lbl_sessions.config(text=f"Sesiones activas: {active}")
+            
+            # Logs de auditoría
+            for r in self.audit_tree.get_children(): self.audit_tree.delete(r)
+            logs = self.db.fetch_all("SELECT fecha, usuario, accion, tabla, detalles FROM auditoria ORDER BY fecha DESC LIMIT 50")
+            for log in logs: self.audit_tree.insert('', 'end', values=log)
+        except Exception as e:
+            logging.error(f"Error al refrescar seguridad: {e}")
 
     def refresh_inventory(self):
-        """Consulta y dibuja la lista de ingredientes del inventario."""
-        # Limpiar lista actual
-        for w in self.inv_list_frame.winfo_children(): w.destroy()
+        """Consulta y actualiza la tabla de inventario con formato limpio."""
+        # Limpiar tabla actual
+        for r in self.inv_tree.get_children():
+            self.inv_tree.delete(r)
+            
         rows = self.db.fetch_all('SELECT id, ingrediente, cantidad, unidad, stock_minimo FROM inventario')
         
-        # Cabecera simple para la lista
-        h = ttk.Frame(self.inv_list_frame)
-        h.pack(fill='x', pady=5)
-        ttk.Label(h, text='Ingrediente', font=(None, 10, 'bold'), width=25).pack(side='left')
-        ttk.Label(h, text='Stock', font=(None, 10, 'bold'), width=15).pack(side='left')
-        ttk.Label(h, text='Acciones', font=(None, 10, 'bold')).pack(side='left')
-
-        # Filas de ingredientes
         for r in rows:
-            f = ttk.Frame(self.inv_list_frame, padding=5)
-            f.pack(fill='x')
+            # Formatear el stock a 2 decimales para que no se vea como 2.1999999999
+            stock_fmt = f"{r[2]:.2f}"
             
-            # Alerta visual: Rojo si el stock es menor o igual al mínimo configurado
-            color = "danger" if r[2] <= r[4] else "success"
+            # Insertar en la tabla
+            item_id = self.inv_tree.insert('', 'end', values=(r[0], r[1], stock_fmt, r[3], r[4]))
             
-            ttk.Label(f, text=r[1], width=25).pack(side='left')
-            ttk.Label(f, text=f"{r[2]} {r[3]}", width=15, bootstyle=color).pack(side='left')
-            
-            # Botones para ajuste rápido de stock
-            ttk.Button(f, text='+1', command=lambda id=r[0]: self.add_stock(id, 1), bootstyle="success-outline", width=5).pack(side='left', padx=2)
-            ttk.Button(f, text='-1', command=lambda id=r[0]: self.add_stock(id, -1), bootstyle="warning-outline", width=5).pack(side='left', padx=2)
+            # Aplicar color si el stock está bajo el mínimo
+            if r[2] <= r[4]:
+                self.inv_tree.tag_configure('low_stock', foreground='#ef4444') # Rojo
+                self.inv_tree.item(item_id, tags=('low_stock',))
+            else:
+                self.inv_tree.tag_configure('normal_stock', foreground='#10b981') # Verde
+                self.inv_tree.item(item_id, tags=('normal_stock',))
 
     def refresh_users(self):
         """Actualiza la tabla de usuarios registrados."""
@@ -702,7 +1035,12 @@ class AdminFrame(ttk.Frame):
             messagebox.showwarning('Error', 'El usuario y la contraseña son obligatorios')
             return
         try:
-            self.db.execute('INSERT INTO usuarios (username, password, rol, nombre_completo) VALUES (?,?,?,?)', (u, p, r or 'Cajera', n or u))
+            hashed_p = hash_password(p)
+            self.db.execute('INSERT INTO usuarios (username, password, rol, nombre_completo) VALUES (?,?,?,?)', (u, hashed_p, r or 'Cajera', n or u))
+            
+            # Registrar en auditoría
+            self.db.audit_log('usuarios', 'INSERT', 'Admin', f'Usuario creado: {u}')
+            
             messagebox.showinfo('Éxito', 'Usuario creado correctamente')
             # Limpiar campos después de crear
             for e in (self.e_user, self.e_pass, self.e_nombre): e.delete(0, 'end')
@@ -713,7 +1051,14 @@ class AdminFrame(ttk.Frame):
     def add_stock(self, id, amount):
         """Incrementa o decrementa la cantidad de un ingrediente específico."""
         try:
+            # Obtener datos previos para auditoría
+            prev = self.db.fetch_one("SELECT ingrediente, cantidad FROM inventario WHERE id=?", (id,))
+            
             self.db.execute('UPDATE inventario SET cantidad = cantidad + ? WHERE id = ?', (amount, id))
+            
+            # Registrar en auditoría
+            self.db.audit_log('inventario', 'UPDATE', 'Admin', f'Stock ajustado: {prev[0]} ({amount})', prev={'cantidad': prev[1]}, new={'cantidad': prev[1]+amount})
+            
             self.refresh_inventory()
         except Exception as e:
             messagebox.showerror('Error', 'No se pudo actualizar el stock')
@@ -774,20 +1119,29 @@ class LoginWindow(ttk.Toplevel):
             return
         
         # Consulta de validación
-        row = self.db.fetch_one('SELECT id, username, rol, nombre_completo FROM usuarios WHERE username = ? AND password = ?', (u, p))
+        row = self.db.fetch_one('SELECT id, username, password, rol, nombre_completo FROM usuarios WHERE username = ?', (u,))
         if not row:
+            # Registrar intento fallido
+            self.db.log_access(None, u, 'failed_login', 'Usuario no encontrado')
             messagebox.showerror('Error', 'Usuario o contraseña incorrectos')
             return
         
-        # Guardar info del usuario autenticado
-        self.user = {'id': row[0], 'username': row[1], 'rol': row[2], 'nombre_completo': row[3]}
-        try:
-            # Registrar el evento de login exitoso
-            self.db.log_access(self.user['id'], self.user['username'], 'login')
-        except Exception:
-            logging.exception('Error registrando login')
-        
-        self.destroy() # Cerrar ventana de login al tener éxito
+        stored_password = row[2]
+        if verify_password(stored_password, p):
+            # Login exitoso
+            user_data = {'id': row[0], 'username': row[1], 'rol': row[3], 'nombre_completo': row[4]}
+            # Crear sesión en el gestor de sesiones
+            self.session_token = session_manager.create_session(user_data)
+            self.user = user_data # Para compatibilidad con el código existente
+            try:
+                self.db.log_access(self.user['id'], self.user['username'], 'login')
+            except Exception:
+                logging.exception('Error registrando login')
+            self.destroy()
+        else:
+            # Registrar intento fallido
+            self.db.log_access(row[0], u, 'failed_login', 'Contraseña incorrecta')
+            messagebox.showerror('Error', 'Usuario o contraseña incorrectos')
 
     def cancel(self):
         """Cierra el login sin autenticar."""
@@ -806,6 +1160,7 @@ class App(ttk.Window):
         self.title('PIK\'TA SOFT - Sistema de Restaurante')
         self.db = DatabaseManager()
         self.user = None
+        self.session_token = None
 
         # --- Bucle de Login Persistente ---
         while not self.user:
@@ -814,6 +1169,7 @@ class App(ttk.Window):
             self.wait_window(login)
             if getattr(login, 'user', None):
                 self.user = login.user
+                self.session_token = getattr(login, 'session_token', None)
             else:
                 if not messagebox.askretrycancel("Login Requerido", "¿Desea intentar iniciar sesión nuevamente?"):
                     self.destroy()
@@ -825,7 +1181,19 @@ class App(ttk.Window):
         # Configurar navegación global por teclado
         self.bind_all('<Return>', self._on_global_return)
         
+        # Iniciar verificación periódica de sesión (cada 1 minuto)
+        self.after(60000, self._check_session_periodically)
+        
         self.build()
+
+    def _check_session_periodically(self):
+        """Verifica si la sesión sigue siendo válida."""
+        if self.session_token and not session_manager.validate_session(self.session_token):
+            messagebox.showwarning("Sesión Expirada", "Su sesión ha expirado por inactividad. Por favor, inicie sesión de nuevo.")
+            self.logout()
+        else:
+            # Seguir verificando cada minuto
+            self.after(60000, self._check_session_periodically)
 
     def _on_global_return(self, event):
         """Manejador global para la tecla ENTER."""
@@ -850,20 +1218,23 @@ class App(ttk.Window):
         # Botón para salir (más grande)
         ttk.Button(header, text='Cerrar Sesión', command=self.logout, bootstyle="danger", cursor="hand2", padding=12).pack(side='right', pady=10)
 
-        # --- Contenedor de Pestañas ---
-        self.notebook = ttk.Notebook(self)
-        self.notebook.pack(fill='both', expand=True, padx=20, pady=20)
-
-        # Estilo para ocultar las pestañas
+        # --- Contenedor de Pestañas (Navegación Principal) ---
+        # Usamos un estilo personalizado 'Hidden.TNotebook' para ocultar las pestañas superiores
+        # Esto nos permite simular una aplicación de una sola página (SPA) en el menú principal
         style = ttk.Style()
-        style.layout('TNotebook.Tab', []) 
-        style.configure('TNotebook', borderwidth=0, highlightthickness=0)
+        style.layout('Hidden.TNotebook.Tab', []) 
+        style.configure('Hidden.TNotebook', borderwidth=0, highlightthickness=0)
+        
+        self.notebook = ttk.Notebook(self, style='Hidden.TNotebook')
+        self.notebook.pack(fill='both', expand=True, padx=20, pady=20)
 
         role = self.user.get('rol', '').lower()
 
-        # --- Dashboard ---
+        # --- Dashboard (Pestaña Inicial) ---
         home = ttk.Frame(self.notebook, padding=30)
         self.notebook.add(home, text='Inicio')
+        # Aseguramos que el Dashboard sea la pestaña seleccionada al iniciar
+        self.notebook.select(home)
 
         cards_wrap = ttk.Frame(home)
         cards_wrap.pack(fill='both', expand=True)
@@ -952,6 +1323,7 @@ class App(ttk.Window):
 
         # --- Carga Dinámica de Pestañas según Rol ---
         # Solo se añaden las pestañas a las que el usuario tiene permiso de acceder.
+        # IMPORTANTE: Se añadió 'administrador' y 'admin' para asegurar el acceso total.
         if role in ('administrador', 'admin', 'mesero', 'cajera', 'supervisor'):
             pos_tab = POSFrame(self.notebook, self.db, user=self.user)
             self.notebook.add(pos_tab, text='Caja / POS')
@@ -960,7 +1332,7 @@ class App(ttk.Window):
             kds_tab = KDSFrame(self.notebook, self.db, user=self.user)
             self.notebook.add(kds_tab, text='Cocina (KDS)')
 
-        if role in ('administrador', 'admin', 'supervisor'):
+        if role in ('administrador', 'admin', 'supervisor', 'super'):
             admin_tab = AdminFrame(self.notebook, self.db)
             self.notebook.add(admin_tab, text='Admin')
 
@@ -991,6 +1363,9 @@ class App(ttk.Window):
     def logout(self):
         """Cierra la sesión del usuario y termina la aplicación."""
         try:
+            if self.session_token:
+                session_manager.close_session(self.session_token)
+            
             if getattr(self, 'user', None):
                 # Registrar el evento de salida en los logs
                 self.db.log_access(self.user.get('id'), self.user.get('username'), 'logout')
