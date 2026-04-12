@@ -2157,3 +2157,55 @@ Traceback (most recent call last):
     cur.execute(query, params)
     ~~~~~~~~~~~^^^^^^^^^^^^^^^
 sqlite3.IntegrityError: NOT NULL constraint failed: caja_sesiones.monto_apertura
+2026-04-11 23:38:50,073 - ERROR - Uncaught exception
+Traceback (most recent call last):
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\main_app.py", line 907, in <module>
+    app = App()
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\main_app.py", line 772, in __init__
+    self.build()
+    ~~~~~~~~~~^^
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\main_app.py", line 870, in build
+    admin_tab = AdminFrame(self.notebook, self.db)
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\main_app.py", line 578, in __init__
+    self.setup_users()
+    ~~~~~~~~~~~~~~~~^^
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\main_app.py", line 593, in setup_users
+    form = ttk.LabelFrame(self.users_frame, text='Nuevo Usuario', padding=10)
+  File "C:\Users\DAVIS\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\ttkbootstrap\style.py", line 5516, in __init__wrapper
+    func(self, *args, **kwargs)
+    ~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.3312.0_x64__qbz5n2kfra8p0\Lib\tkinter\__init__.py", line 4786, in __init__
+    Widget.__init__(self, master, 'labelframe', cnf, kw)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.3312.0_x64__qbz5n2kfra8p0\Lib\tkinter\__init__.py", line 2791, in __init__
+    self.tk.call(
+    ~~~~~~~~~~~~^
+        (widgetName, self._w) + extra + self._options(cnf))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_tkinter.TclError: unknown option "-padding"
+2026-04-11 23:42:26,492 - ERROR - Uncaught exception
+Traceback (most recent call last):
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\main_app.py", line 907, in <module>
+    app = App()
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\main_app.py", line 772, in __init__
+    self.build()
+    ~~~~~~~~~~^^
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\main_app.py", line 870, in build
+    admin_tab = AdminFrame(self.notebook, self.db)
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\main_app.py", line 578, in __init__
+    self.setup_users()
+    ~~~~~~~~~~~~~~~~^^
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\main_app.py", line 593, in setup_users
+    form = ttk.LabelFrame(self.users_frame, text='Nuevo Usuario', bootstyle="success")
+  File "C:\Users\DAVIS\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\ttkbootstrap\style.py", line 5516, in __init__wrapper
+    func(self, *args, **kwargs)
+    ~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.3312.0_x64__qbz5n2kfra8p0\Lib\tkinter\__init__.py", line 4786, in __init__
+    Widget.__init__(self, master, 'labelframe', cnf, kw)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.3312.0_x64__qbz5n2kfra8p0\Lib\tkinter\__init__.py", line 2791, in __init__
+    self.tk.call(
+    ~~~~~~~~~~~~^
+        (widgetName, self._w) + extra + self._options(cnf))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_tkinter.TclError: unknown option "-bootstyle"
