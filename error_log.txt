@@ -2129,3 +2129,31 @@ Traceback (most recent call last):
     cur.execute(query, params)
     ~~~~~~~~~~~^^^^^^^^^^^^^^^
 sqlite3.OperationalError: table caja_sesiones has no column named inicio
+2026-04-11 23:20:08,672 - ERROR - DB execute error: NOT NULL constraint failed: caja_sesiones.monto_apertura - Query: INSERT INTO caja_sesiones (usuario_id, inicio, inicial, estado) VALUES (?,?,?,?) - Params: (1, '2026-04-11T23:20:08.671249', 10.0, 'ABIERTO')
+Traceback (most recent call last):
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\main_app.py", line 247, in execute
+    cur.execute(query, params)
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^
+sqlite3.IntegrityError: NOT NULL constraint failed: caja_sesiones.monto_apertura
+2026-04-11 23:20:08,683 - ERROR - Error abriendo caja: NOT NULL constraint failed: caja_sesiones.monto_apertura
+Traceback (most recent call last):
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\main_app.py", line 380, in open_caja
+    cur = self.db.execute('INSERT INTO caja_sesiones (usuario_id, inicio, inicial, estado) VALUES (?,?,?,?)', (usuario_id, inicio, inicial, 'ABIERTO'))
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\main_app.py", line 247, in execute
+    cur.execute(query, params)
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^
+sqlite3.IntegrityError: NOT NULL constraint failed: caja_sesiones.monto_apertura
+2026-04-11 23:22:40,086 - ERROR - DB execute error: NOT NULL constraint failed: caja_sesiones.monto_apertura - Query: INSERT INTO caja_sesiones (usuario_id, inicio, inicial, estado) VALUES (?,?,?,?) - Params: (1, '2026-04-11T23:22:40.085614', 10.0, 'ABIERTO')
+Traceback (most recent call last):
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\main_app.py", line 247, in execute
+    cur.execute(query, params)
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^
+sqlite3.IntegrityError: NOT NULL constraint failed: caja_sesiones.monto_apertura
+2026-04-11 23:22:40,087 - ERROR - Error abriendo caja: NOT NULL constraint failed: caja_sesiones.monto_apertura
+Traceback (most recent call last):
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\main_app.py", line 380, in open_caja
+    cur = self.db.execute('INSERT INTO caja_sesiones (usuario_id, inicio, inicial, estado) VALUES (?,?,?,?)', (usuario_id, inicio, inicial, 'ABIERTO'))
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\main_app.py", line 247, in execute
+    cur.execute(query, params)
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^
+sqlite3.IntegrityError: NOT NULL constraint failed: caja_sesiones.monto_apertura

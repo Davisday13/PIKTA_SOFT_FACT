@@ -201,6 +201,7 @@ class DatabaseManager:
             # Ensure caja_sesiones columns exist for older DBs
             self._ensure_column('caja_sesiones', 'inicio', 'TEXT')
             self._ensure_column('caja_sesiones', 'inicial', 'REAL')
+            self._ensure_column('caja_sesiones', 'monto_apertura', 'REAL')
             self._ensure_column('caja_sesiones', 'estado', 'TEXT')
             self._ensure_column('caja_sesiones', 'cierre_total', 'REAL')
             self._ensure_column('caja_sesiones', 'cierre_at', 'TEXT')
@@ -377,7 +378,8 @@ class POSFrame(tk.Frame):
         usuario_id = self.user.get('id') if self.user else None
         inicio = datetime.now().isoformat()
         try:
-            cur = self.db.execute('INSERT INTO caja_sesiones (usuario_id, inicio, inicial, estado) VALUES (?,?,?,?)', (usuario_id, inicio, inicial, 'ABIERTO'))
+            # include monto_apertura to satisfy older schemas with NOT NULL constraint
+            cur = self.db.execute('INSERT INTO caja_sesiones (usuario_id, inicio, inicial, monto_apertura, estado) VALUES (?,?,?,?,?)', (usuario_id, inicio, inicial, inicial, 'ABIERTO'))
             self.session_id = cur.lastrowid
             messagebox.showinfo('Caja', f'Caja abierta (ID {self.session_id})')
         except Exception as e:
