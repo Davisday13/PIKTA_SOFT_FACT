@@ -410,29 +410,43 @@ class DatabaseManager:
             raise
 
 
-class POSFrame(ttk.Frame):
+class POSFrame(tk.Canvas):
     """
-    Interfaz del Punto de Venta (POS).
-    Permite seleccionar productos, gestionar el carrito y realizar ventas.
+    Interfaz de Punto de Venta (Caja).
+    Permite realizar ventas directas y cobrar pedidos de meseros.
     """
     def __init__(self, parent, db: DatabaseManager, *args, **kwargs):
         user = kwargs.pop('user', None)
-        super().__init__(parent, padding=10, *args, **kwargs)
+        super().__init__(parent, bg=BG, highlightthickness=0, *args, **kwargs)
         self.db = db
         self.user = user
         self.session_id = None
-        self.cart = [] # Lista de productos en la orden actual
+        self.cart = [] 
         
-        # Logo de Fondo (Marca de Agua) en POS - Usamos tk.Label para transparencia
+        # Logo de Fondo en POS
         bg_logo_path = os.path.join('Imagenes', 'pikta2.png')
-        self.bg_img_pos = load_image(bg_logo_path, size=(500, 500))
-        if self.bg_img_pos:
-            bg_lbl = tk.Label(self, image=self.bg_img_pos, bg=BG)
-            bg_lbl.place(relx=0.5, rely=0.5, anchor='center')
-            bg_lbl.lower()
+        if os.path.exists(bg_logo_path) and PIL_AVAILABLE:
+            self.bg_raw = Image.open(bg_logo_path)
+            def draw_pos_bg(e):
+                self.delete("bg")
+                cw, ch = e.width, e.height
+                if cw < 10 or ch < 10: return
+                img_res = self.bg_raw.resize((cw, ch), Image.LANCZOS)
+                self.bg_photo = ImageTk.PhotoImage(img_res)
+                self.create_image(cw//2, ch//2, image=self.bg_photo, tags="bg")
+                self.tag_lower("bg")
+            self.bind("<Configure>", draw_pos_bg)
+
+        # Contenedor principal para los widgets
+        self.main_container = ttk.Frame(self)
+        self.create_window(0, 0, window=self.main_container, anchor='nw', tags="main_win")
+        
+        def resize_pos_content(e):
+            self.itemconfig("main_win", width=e.width, height=e.height)
+        self.bind("<Configure>", lambda e: (draw_pos_bg(e) if hasattr(self, 'bg_raw') else None, resize_pos_content(e)), add="+")
 
         # --- Cabecera del POS con Resaltado ---
-        header = ttk.Frame(self, bootstyle="info", padding=15)
+        header = ttk.Frame(self.main_container, bootstyle="info", padding=15)
         header.pack(fill='x')
         
         # Icono decorativo del POS
@@ -459,12 +473,6 @@ class POSFrame(ttk.Frame):
         # Pestaña 1: Venta Directa
         self.tab_venta = ttk.Frame(self.pos_notebook, padding=10)
         self.pos_notebook.add(self.tab_venta, text='🛒 Venta Directa')
-
-        # Logo de Fondo en Venta Directa
-        if self.bg_img_pos:
-            bg_lbl = tk.Label(self.tab_venta, image=self.bg_img_pos, bg=BG)
-            bg_lbl.place(relx=0.5, rely=0.5, anchor='center')
-            bg_lbl.lower()
 
         # Lado izquierdo de Venta Directa: Catálogo
         left_v = ttk.Frame(self.tab_venta)
@@ -507,12 +515,6 @@ class POSFrame(ttk.Frame):
         # Pestaña 2: Cobrar Mesas
         self.tab_cobros = ttk.Frame(self.pos_notebook, padding=10)
         self.pos_notebook.add(self.tab_cobros, text='📋 Cobrar Mesas')
-        
-        # Logo de Fondo en Cobrar Mesas
-        if self.bg_img_pos:
-            bg_lbl_c = tk.Label(self.tab_cobros, image=self.bg_img_pos, bg=BG)
-            bg_lbl_c.place(relx=0.5, rely=0.5, anchor='center')
-            bg_lbl_c.lower()
         
         self.build_cobros_tab()
 
@@ -766,29 +768,43 @@ class POSFrame(ttk.Frame):
         ttk.Button(frm, text='Regresar al Menú', command=self.render_products, bootstyle="info").pack(pady=10)
 
 
-class MeseroFrame(ttk.Frame):
+class MeseroFrame(tk.Canvas):
     """
     Interfaz para Meseros.
     Permite realizar pedidos asignados a mesas o para llevar.
     """
     def __init__(self, parent, db: DatabaseManager, *args, **kwargs):
         user = kwargs.pop('user', None)
-        super().__init__(parent, padding=10, *args, **kwargs)
+        super().__init__(parent, bg=BG, highlightthickness=0, *args, **kwargs)
         self.db = db
         self.user = user
         self.cart = []
         self.selected_mesa = tk.StringVar(value="Mesa 1")
         
-        # Logo de Fondo (Marca de Agua) en Mesero - Usamos tk.Label para transparencia
+        # Logo de Fondo en Mesero
         bg_logo_path = os.path.join('Imagenes', 'pikta2.png')
-        self.bg_img_mes = load_image(bg_logo_path, size=(500, 500))
-        if self.bg_img_mes:
-            bg_lbl = tk.Label(self, image=self.bg_img_mes, bg=BG)
-            bg_lbl.place(relx=0.5, rely=0.5, anchor='center')
-            bg_lbl.lower()
+        if os.path.exists(bg_logo_path) and PIL_AVAILABLE:
+            self.bg_raw = Image.open(bg_logo_path)
+            def draw_mes_bg(e):
+                self.delete("bg")
+                cw, ch = e.width, e.height
+                if cw < 10 or ch < 10: return
+                img_res = self.bg_raw.resize((cw, ch), Image.LANCZOS)
+                self.bg_photo = ImageTk.PhotoImage(img_res)
+                self.create_image(cw//2, ch//2, image=self.bg_photo, tags="bg")
+                self.tag_lower("bg")
+            self.bind("<Configure>", draw_mes_bg)
+
+        # Contenedor principal
+        self.container = ttk.Frame(self)
+        self.create_window(0, 0, window=self.container, anchor='nw', tags="main_win")
+        
+        def resize_mes_content(e):
+            self.itemconfig("main_win", width=e.width, height=e.height)
+        self.bind("<Configure>", lambda e: (draw_mes_bg(e) if hasattr(self, 'bg_raw') else None, resize_mes_content(e)), add="+")
 
         # --- Cabecera ---
-        header = ttk.Frame(self, bootstyle="warning", padding=15)
+        header = ttk.Frame(self.container, bootstyle="warning", padding=15)
         header.pack(fill='x')
         
         mesero_img = load_image(os.path.join('Imagenes', 'user.png'), size=(60, 60))
@@ -807,12 +823,6 @@ class MeseroFrame(ttk.Frame):
         # Lado izquierdo: Mesas y Productos
         left = ttk.Frame(body)
         left.pack(side='left', fill='both', expand=True, padx=(0, 10))
-
-        # Logo de Fondo en Mesero (Colocado en left para visibilidad)
-        if self.bg_img_mes:
-            bg_lbl = tk.Label(left, image=self.bg_img_mes, bg=BG)
-            bg_lbl.place(relx=0.5, rely=0.5, anchor='center')
-            bg_lbl.lower()
 
         # Selección de Mesa / Para Llevar
         mesa_frame = ttk.LabelFrame(left, text="Seleccionar Mesa / Destino")
@@ -989,81 +999,64 @@ class KDSFrame(ttk.Frame):
         self.refresh() # Refrescar la lista inmediatamente
 
 
-class WhatsAppFrame(ttk.Frame):
+class WhatsAppFrame(tk.Canvas):
     """
-    Módulo de WhatsApp Web.
-    Permite la conexión y gestión de mensajes con clientes.
+    Módulo de WhatsApp Business PIK'TA.
+    Se abre automáticamente en una ventana profesional integrada.
     """
     def __init__(self, parent, db: DatabaseManager, *args, **kwargs):
-        super().__init__(parent, padding=10, *args, **kwargs)
+        super().__init__(parent, bg=BG, highlightthickness=0, *args, **kwargs)
         self.db = db
         
-        # Logo de Fondo (Marca de Agua) en WhatsApp - Usamos tk.Label para transparencia
+        # Logo de Fondo en WhatsApp
         bg_logo_path = os.path.join('Imagenes', 'pikta2.png')
-        self.bg_img_wa = load_image(bg_logo_path, size=(500, 500))
-        if self.bg_img_wa:
-            bg_lbl = tk.Label(self, image=self.bg_img_wa, bg=BG)
-            bg_lbl.place(relx=0.5, rely=0.5, anchor='center')
-            bg_lbl.lower()
+        if os.path.exists(bg_logo_path) and PIL_AVAILABLE:
+            self.bg_raw = Image.open(bg_logo_path)
+            def draw_wa_bg(e):
+                self.delete("bg")
+                cw, ch = e.width, e.height
+                if cw < 10 or ch < 10: return
+                img_res = self.bg_raw.resize((cw, ch), Image.LANCZOS)
+                self.bg_photo = ImageTk.PhotoImage(img_res)
+                self.create_image(cw//2, ch//2, image=self.bg_photo, tags="bg")
+                self.tag_lower("bg")
+            self.bind("<Configure>", draw_wa_bg)
+
+        # Contenedor
+        self.container = ttk.Frame(self)
+        self.create_window(0, 0, window=self.container, anchor='nw', tags="main_win")
+        
+        def resize_wa_content(e):
+            self.itemconfig("main_win", width=e.width, height=e.height)
+        self.bind("<Configure>", lambda e: (draw_wa_bg(e) if hasattr(self, 'bg_raw') else None, resize_wa_content(e)), add="+")
 
         # --- Cabecera ---
-        header = ttk.Frame(self, bootstyle="success", padding=15)
+        header = ttk.Frame(self.container, bootstyle="success", padding=15)
         header.pack(fill='x')
         
-        wa_img = load_image(os.path.join('Imagenes', 'yappy.png'), size=(60, 60))
+        wa_img = load_image(os.path.join('Imagenes', 'WhatsApp.jpg'), size=(60, 60))
         if wa_img:
             lbl = ttk.Label(header, image=wa_img, bootstyle="inverse-success")
             lbl.image = wa_img
             lbl.pack(side='left', padx=10)
         
-        ttk.Label(header, text='💬 WHATSAPP WEB PIK\'TA', font=(None, 24, 'bold'), bootstyle="inverse-success").pack(side='left', padx=10)
+        ttk.Label(header, text='💬 WHATSAPP BUSINESS PIK\'TA', font=(None, 24, 'bold'), bootstyle="inverse-success").pack(side='left', padx=10)
         ttk.Button(header, text='Regresar', command=lambda: self.master.select(0), bootstyle="secondary-outline", cursor="hand2", padding=10).pack(side='right', padx=5)
 
-        # --- Cuerpo ---
+        # --- Cuerpo Informativo (Sin chats simulados) ---
         body = ttk.Frame(self)
         body.pack(fill='both', expand=True, pady=10)
-
-        # Lado izquierdo: Lista de Chats
-        left = ttk.Frame(body, width=300, bootstyle="light")
-        left.pack(side='left', fill='y', padx=(0, 10))
-        left.pack_propagate(False)
         
-        ttk.Label(left, text='CHATS RECIENTES', font=(None, 12, 'bold'), padding=10).pack(fill='x')
-        self.chat_list = tk.Listbox(left, bg="#ffffff", fg="#333333", font=(None, 11), bd=0, highlightthickness=0)
-        self.chat_list.pack(fill='both', expand=True, padx=5, pady=5)
+        info_container = tk.Frame(body, bg=BG)
+        info_container.place(relx=0.5, rely=0.5, anchor='center')
         
-        # Simulación de chats
-        sample_chats = ["+507 6677-8899 (Cliente 1)", "+507 6123-4567 (Cliente 2)", "+507 6987-6543 (Cliente 3)"]
-        for chat in sample_chats:
-            self.chat_list.insert('end', chat)
-
-        # Lado derecho: Área de Mensajes
-        right = ttk.Frame(body, bootstyle="secondary")
-        right.pack(side='right', fill='both', expand=True)
+        ttk.Label(info_container, text="WhatsApp Business se está ejecutando de forma integrada.", 
+                 font=(None, 16, 'bold'), bootstyle="inverse-dark").pack(pady=10)
+        ttk.Label(info_container, text="Gestione sus pedidos y clientes desde la ventana profesional de WhatsApp.", 
+                 font=(None, 12), bootstyle="inverse-dark").pack(pady=5)
         
-        # Área de chat
-        self.chat_display = tk.Text(right, bg="#e5ddd5", state='disabled', font=(None, 12), padx=10, pady=10)
-        self.chat_display.pack(fill='both', expand=True, padx=10, pady=(10, 0))
-        
-        # Logo de Fondo en WhatsApp (Dentro del display si es posible, o detrás)
-        if self.bg_img_wa:
-            bg_lbl = tk.Label(self.chat_display, image=self.bg_img_wa, bg="#e5ddd5")
-            bg_lbl.place(relx=0.5, rely=0.5, anchor='center')
-            bg_lbl.lower()
-        
-        # Entrada de mensaje
-        input_frame = ttk.Frame(right, padding=10)
-        input_frame.pack(fill='x')
-        
-        self.msg_entry = ttk.Entry(input_frame, font=(None, 12))
-        self.msg_entry.pack(side='left', fill='x', expand=True, padx=(0, 10))
-        
-        ttk.Button(input_frame, text='Enviar', bootstyle="success", command=self.send_message).pack(side='right')
-
-        # Botón de conexión (Real)
-        ttk.Button(left, text='ABRIR WHATSAPP WEB', bootstyle="success", command=self.connect_wa, padding=10).pack(fill='x', padx=10, pady=10)
-        
-        ttk.Label(left, text="Nota: Se abrirá en su navegador\npara mayor seguridad.", font=(None, 9), bootstyle="secondary", justify='center').pack(pady=5)
+        ttk.Button(info_container, text='REABRIR WHATSAPP INTEGRADO', bootstyle="success", 
+                  command=self.connect_wa, padding=15).pack(pady=20)
 
     def connect_wa(self):
         """Abre WhatsApp Web de forma integrada y silenciosa."""
@@ -1071,27 +1064,16 @@ class WhatsAppFrame(ttk.Frame):
             script_path = os.path.join(os.getcwd(), 'whatsapp_launcher.py')
             if os.path.exists(script_path):
                 import subprocess
-                # Usamos CREATE_NO_WINDOW para que no aparezca el CMD negro
-                # Usamos DETACHED_PROCESS para que sea independiente
-                DETACHED_PROCESS = 0x00000008
-                CREATE_NO_WINDOW = 0x08000000
-                
+                # CREATE_NO_WINDOW (0x08000000) evita el CMD negro
+                # DETACHED_PROCESS (0x00000008) asegura independencia total
                 subprocess.Popen([sys.executable, script_path], 
-                               creationflags=DETACHED_PROCESS | CREATE_NO_WINDOW,
+                               creationflags=0x08000008, 
                                close_fds=True)
             else:
                 webbrowser.open("https://web.whatsapp.com/")
         except Exception as e:
             logging.error(f"Error al lanzar WhatsApp silencioso: {e}")
             webbrowser.open("https://web.whatsapp.com/")
-
-    def send_message(self):
-        msg = self.msg_entry.get().strip()
-        if msg:
-            self.chat_display.config(state='normal')
-            self.chat_display.insert('end', f"Tú: {msg}\n", "sent")
-            self.chat_display.config(state='disabled')
-            self.msg_entry.delete(0, 'end')
 
 class AdminFrame(ttk.Frame):
     """
@@ -1701,67 +1683,69 @@ class App(ttk.Window):
         ttk.Button(header, text='Cerrar Sesión', command=self.logout, bootstyle="danger", cursor="hand2", padding=12).pack(side='right', pady=10)
 
         # --- Contenedor de Pestañas (Navegación Principal) ---
-        # Usamos un estilo personalizado 'Hidden.TNotebook' para ocultar las pestañas superiores
-        # Esto nos permite simular una aplicación de una sola página (SPA) en el menú principal
         style = ttk.Style()
         style.layout('Hidden.TNotebook.Tab', []) 
-        style.configure('Hidden.TNotebook', borderwidth=0, highlightthickness=0)
+        # Configurar el Notebook para que no tenga bordes ni fondos que tapen el logo
+        style.configure('Hidden.TNotebook', borderwidth=0, highlightthickness=0, background=BG)
+        style.configure('Hidden.TNotebook.Tab', background=BG)
         
-        self.notebook = ttk.Notebook(self, style='Hidden.TNotebook')
-        self.notebook.pack(fill='both', expand=True, padx=20, pady=20)
+        # Usamos un Frame maestro para el fondo que contenga el Notebook
+        self.master_bg = tk.Frame(self, bg=BG)
+        self.master_bg.pack(fill='both', expand=True)
+
+        # Cargar logo de fondo (Marca de Agua Global)
+        bg_logo_path = os.path.join('Imagenes', 'pikta2.png')
+        self.bg_photo_global = None
+        
+        if os.path.exists(bg_logo_path) and PIL_AVAILABLE:
+            self.bg_image_raw = Image.open(bg_logo_path)
+            # Usamos un Label de tk que ocupe todo el espacio como base real
+            self.bg_lbl_global = tk.Label(self.master_bg, bg=BG)
+            self.bg_lbl_global.place(x=0, y=0, relwidth=1, relheight=1)
+            
+            def resize_global_bg(e):
+                cw, ch = e.width, e.height
+                if cw < 10 or ch < 10: return
+                img_resized = self.bg_image_raw.resize((cw, ch), Image.LANCZOS)
+                self.bg_photo_global = ImageTk.PhotoImage(img_resized)
+                self.bg_lbl_global.config(image=self.bg_photo_global)
+            
+            self.master_bg.bind("<Configure>", resize_global_bg)
+
+        # IMPORTANTE: Para transparencia, los frames deben heredar el fondo del Label o ser transparentes
+        # Como Tkinter no tiene transparencia real de widgets, colocamos el Notebook ENCIMA del Label
+        self.notebook = ttk.Notebook(self.master_bg, style='Hidden.TNotebook')
+        self.notebook.place(x=0, y=0, relwidth=1, relheight=1)
 
         role = self.user.get('rol', '').lower()
 
         # --- Dashboard (Pestaña Inicial) ---
-        home = tk.Frame(self.notebook, bg=BG)
+        # Usamos un Canvas como base para permitir el logo de fondo real
+        home = tk.Canvas(self.notebook, bg=BG, highlightthickness=0)
         self.notebook.add(home, text='Inicio')
         self.notebook.select(home)
 
-        # Usamos un Canvas que ocupe TODO el espacio disponible
-        self.dash_canvas = tk.Canvas(home, bg=BG, highlightthickness=0)
-        self.dash_canvas.pack(fill='both', expand=True)
-
-        # Cargar logo de fondo (Agua)
-        bg_logo_path = os.path.join('Imagenes', 'pikta2.png')
+        # Cargar logo de fondo para el dashboard
         if os.path.exists(bg_logo_path) and PIL_AVAILABLE:
-            # Guardamos la imagen original para redimensionar sin perder calidad
-            self.bg_image_raw = Image.open(bg_logo_path)
-            self.bg_photo = None # Se generará dinámicamente
-            
-            def update_background(e):
-                # Redimensionar para cubrir todo el canvas (STRETCH)
-                cw, ch = self.dash_canvas.winfo_width(), self.dash_canvas.winfo_height()
+            def draw_dashboard_bg(e):
+                home.delete("bg")
+                cw, ch = e.width, e.height
                 if cw < 10 or ch < 10: return
-                
-                # Redimensionar imagen al tamaño actual del canvas
-                img_resized = self.bg_image_raw.resize((cw, ch), Image.LANCZOS)
-                self.bg_photo = ImageTk.PhotoImage(img_resized)
-                
-                self.dash_canvas.delete("bg_img")
-                # Dibujamos la imagen centrada cubriendo todo el canvas
-                self.dash_canvas.create_image(cw//2, ch//2, image=self.bg_photo, tags="bg_img")
-                # Aseguramos que el logo esté detrás de todo lo que se ponga en el canvas
-                self.dash_canvas.tag_lower("bg_img")
+                img_res = self.bg_image_raw.resize((cw, ch), Image.LANCZOS)
+                home.bg_img = ImageTk.PhotoImage(img_res)
+                home.create_image(cw//2, ch//2, image=home.bg_img, tags="bg")
+                home.tag_lower("bg")
             
-            # El evento Configure se dispara al cambiar el tamaño de la ventana
-            self.dash_canvas.bind("<Configure>", update_background)
+            home.bind("<Configure>", draw_dashboard_bg)
 
-        # Contenedor para las tarjetas (dentro del canvas como una ventana)
-        # IMPORTANTE: El fondo de cards_content debe ser el mismo que el del canvas para "transparencia"
-        cards_content = tk.Frame(self.dash_canvas, bg=BG)
-        # Colocamos el contenedor de tarjetas centrado sobre el canvas
-        self.dash_canvas.create_window(0, 0, window=cards_content, anchor="nw", tags="cards_win")
+        # Contenedor para las tarjetas - Centrado sobre el canvas
+        cards_inner = tk.Frame(home, bg=BG) # Mismo color que el fondo para disimular
+        home.create_window(0, 0, window=cards_inner, anchor='center', tags="cards")
         
-        def resize_cards_layer(e):
-            # Hacer que el layer de tarjetas ocupe todo el canvas
-            self.dash_canvas.itemconfig("cards_win", width=e.width, height=e.height)
+        def center_cards(e):
+            home.coords("cards", e.width//2, e.height//2)
         
-        self.dash_canvas.bind("<Configure>", lambda e: (update_background(e), resize_cards_layer(e)), add="+")
-
-        # El contenido real de las tarjetas se centra dentro de cards_content
-        # Usamos un Frame interno para agrupar las tarjetas y centrarlo
-        cards_inner = tk.Frame(cards_content, bg=BG)
-        cards_inner.place(relx=0.5, rely=0.5, anchor='center')
+        home.bind("<Configure>", lambda e: (draw_dashboard_bg(e), center_cards(e)), add="+")
 
         def make_card(parent, img_name, title, desc, cmd=None, style_color="info"):
             """Crea una tarjeta interactiva para el dashboard principal (más grande y atractiva)."""
