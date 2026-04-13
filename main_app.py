@@ -16,7 +16,7 @@ Componentes principales:
 import tkinter as tk
 from tkinter import messagebox, simpledialog
 import ttkbootstrap as ttk
-from ttkbootstrap.constants import *
+from ttkbootstrap.constants import PRIMARY, SUCCESS, DANGER, WARNING, INFO, LIGHT, DARK
 import sqlite3
 import json
 import os
@@ -436,59 +436,151 @@ class POSFrame(ttk.Frame):
         self.btn_close_caja = ttk.Button(header, text='Cerrar Caja', command=self.cerrar_caja, bootstyle="danger", cursor="hand2", padding=10)
         self.btn_close_caja.pack(side='right', padx=5)
 
-        # --- Cuerpo Principal ---
-        body = ttk.Frame(self)
-        body.pack(fill='both', expand=True, pady=10)
+        # --- Contenedor de Pestañas Internas (Venta vs Cobros) ---
+        self.pos_notebook = ttk.Notebook(self)
+        self.pos_notebook.pack(fill='both', expand=True, pady=10)
 
-        # Lado izquierdo: Catálogo de productos
-        left = ttk.Frame(body)
-        left.pack(side='left', fill='both', expand=True, padx=(0, 10))
+        # Pestaña 1: Venta Directa
+        self.tab_venta = ttk.Frame(self.pos_notebook, padding=10)
+        self.pos_notebook.add(self.tab_venta, text='🛒 Venta Directa')
 
-        # Filtro de categorías (Combos, Extras, Bebidas) - Botones más grandes
+        # Lado izquierdo de Venta Directa: Catálogo
+        left_v = ttk.Frame(self.tab_venta)
+        left_v.pack(side='left', fill='both', expand=True, padx=(0, 10))
+
+        # Filtro de categorías
         self.categories = ['🍔 Combos', '🍟 Extras', '🥤 Bebidas']
         self.selected_category = tk.StringVar(value=self.categories[0])
-        cat_frame = ttk.Frame(left)
+        cat_frame = ttk.Frame(left_v)
         cat_frame.pack(fill='x', pady=(0, 15))
         for c in self.categories:
             ttk.Radiobutton(cat_frame, text=c, variable=self.selected_category, value=c, 
                            command=self.render_products, bootstyle="info-toolbutton", padding=10).pack(side='left', padx=5)
 
         # Contenedor con scroll para los productos
-        self.products_canvas = tk.Canvas(left, bg=BG, highlightthickness=0)
-        self.scrollbar = ttk.Scrollbar(left, orient="vertical", command=self.products_canvas.yview)
+        self.products_canvas = tk.Canvas(left_v, bg=BG, highlightthickness=0)
+        self.scrollbar = ttk.Scrollbar(left_v, orient="vertical", command=self.products_canvas.yview)
         self.products_frame = ttk.Frame(self.products_canvas)
 
-        self.products_frame.bind(
-            "<Configure>",
-            lambda e: self.products_canvas.configure(scrollregion=self.products_canvas.bbox("all"))
-        )
+        self.products_frame.bind("<Configure>", lambda e: self.products_canvas.configure(scrollregion=self.products_canvas.bbox("all")))
         self.products_canvas.create_window((0, 0), window=self.products_frame, anchor="nw")
         self.products_canvas.configure(yscrollcommand=self.scrollbar.set)
-
         self.products_canvas.pack(side="left", fill="both", expand=True)
         self.scrollbar.pack(side="right", fill="y")
 
-        # Lado derecho: Resumen de la orden (Carrito)
-        right = ttk.Frame(body, width=350, bootstyle="secondary")
-        right.pack(side='right', fill='y')
-        right.pack_propagate(False) # Mantener ancho fijo
+        # Lado derecho de Venta Directa: Carrito
+        right_v = ttk.Frame(self.tab_venta, width=350, bootstyle="secondary")
+        right_v.pack(side='right', fill='y')
+        right_v.pack_propagate(False)
         
-        ttk.Label(right, text='ORDEN ACTUAL', font=(None, 12, 'bold'), bootstyle="inverse-secondary", padding=10).pack(fill='x')
-        
-        # Lista visual de productos seleccionados
-        self.cart_list = tk.Listbox(right, bg=PANEL, fg=FG, font=(None, 11), bd=0, highlightthickness=0, selectbackground=ACCENT)
+        ttk.Label(right_v, text='ORDEN ACTUAL', font=(None, 12, 'bold'), bootstyle="inverse-secondary", padding=10).pack(fill='x')
+        self.cart_list = tk.Listbox(right_v, bg=PANEL, fg=FG, font=(None, 11), bd=0, highlightthickness=0, selectbackground=ACCENT)
         self.cart_list.pack(fill='both', expand=True, padx=10, pady=10)
-        
-        # Etiqueta de total a pagar
-        self.total_label = ttk.Label(right, text='Total: $0.00', font=(None, 14, 'bold'), bootstyle="inverse-secondary", padding=10)
+        self.total_label = ttk.Label(right_v, text='Total: $0.00', font=(None, 14, 'bold'), bootstyle="inverse-secondary", padding=10)
         self.total_label.pack(fill='x')
 
-        # Botones de gestión de carrito
-        ttk.Button(right, text='Quitar Item', command=self.remove_selected, bootstyle="danger", cursor="hand2").pack(fill='x', padx=10, pady=5)
-        ttk.Button(right, text='CONFIRMAR PEDIDO', command=self.process_order, bootstyle="success", cursor="hand2", padding=10).pack(fill='x', padx=10, pady=10)
+        ttk.Button(right_v, text='Quitar Item', command=self.remove_selected, bootstyle="danger", cursor="hand2").pack(fill='x', padx=10, pady=5)
+        ttk.Button(right_v, text='CONFIRMAR PEDIDO', command=self.process_order, bootstyle="success", cursor="hand2", padding=10).pack(fill='x', padx=10, pady=10)
+
+        # Pestaña 2: Cobrar Mesas
+        self.tab_cobros = ttk.Frame(self.pos_notebook, padding=10)
+        self.pos_notebook.add(self.tab_cobros, text='📋 Cobrar Mesas')
+        
+        self.build_cobros_tab()
 
         # Cargar productos inicialmente
         self.render_products()
+
+    def build_cobros_tab(self):
+        """Construye la interfaz para cobrar pedidos de meseros."""
+        # Lado izquierdo: Lista de pedidos pendientes
+        left_c = ttk.Frame(self.tab_cobros)
+        left_c.pack(side='left', fill='both', expand=True, padx=(0, 10))
+        
+        ttk.Label(left_c, text='PEDIDOS PENDIENTES DE COBRO', font=(None, 14, 'bold')).pack(pady=10)
+        
+        # Tabla de pedidos pendientes
+        cols = ('ID', 'Número', 'Mesa', 'Total', 'Fecha')
+        self.unpaid_tree = ttk.Treeview(left_c, columns=cols, show='headings', bootstyle="info")
+        for col in cols:
+            self.unpaid_tree.heading(col, text=col)
+            self.unpaid_tree.column(col, width=100)
+        
+        self.unpaid_tree.pack(fill='both', expand=True)
+        
+        ttk.Button(left_c, text='Actualizar Lista', command=self.refresh_unpaid_orders, bootstyle="info-outline").pack(pady=10)
+        
+        # Lado derecho: Detalles y Cobro
+        right_c = ttk.Frame(self.tab_cobros, width=400, bootstyle="secondary")
+        right_c.pack(side='right', fill='y')
+        right_c.pack_propagate(False)
+        
+        ttk.Label(right_c, text='DETALLE DE CUENTA', font=(None, 12, 'bold'), bootstyle="inverse-secondary", padding=10).pack(fill='x')
+        self.detail_text = tk.Text(right_c, bg=PANEL, fg=FG, font=(None, 11), height=15)
+        self.detail_text.pack(fill='x', padx=10, pady=10)
+        self.detail_text.config(state='disabled')
+        
+        self.total_cobro_label = ttk.Label(right_c, text='Total a Cobrar: $0.00', font=(None, 16, 'bold'), bootstyle="inverse-secondary", padding=10)
+        self.total_cobro_label.pack(fill='x')
+        
+        ttk.Button(right_c, text='PROCESAR PAGO', command=self.pay_order, bootstyle="success", cursor="hand2", padding=15).pack(fill='x', padx=10, pady=20)
+        
+        self.unpaid_tree.bind('<<TreeviewSelect>>', self.on_unpaid_select)
+        self.refresh_unpaid_orders()
+
+    def refresh_unpaid_orders(self):
+        """Consulta pedidos de meseros que aún no han sido pagados."""
+        for r in self.unpaid_tree.get_children(): self.unpaid_tree.delete(r)
+        
+        query = "SELECT id, numero, mesa, total, created_at FROM pedidos WHERE pagado = 0 AND canal = 'MESERO' ORDER BY created_at DESC"
+        rows = self.db.fetch_all(query)
+        for r in rows:
+            self.unpaid_tree.insert('', 'end', values=r)
+
+    def on_unpaid_select(self, event):
+        """Muestra el detalle del pedido seleccionado."""
+        sel = self.unpaid_tree.selection()
+        if not sel: return
+        item = self.unpaid_tree.item(sel[0])
+        order_id = item['values'][0]
+        
+        order = self.db.fetch_one("SELECT items, total FROM pedidos WHERE id = ?", (order_id,))
+        if order:
+            items = json.loads(order[0])
+            self.detail_text.config(state='normal')
+            self.detail_text.delete('1.0', 'end')
+            for it in items:
+                self.detail_text.insert('end', f"{it['nombre']:<25} ${it['precio']:>6.2f}\n")
+            self.detail_text.config(state='disabled')
+            self.total_cobro_label.config(text=f"Total a Cobrar: ${order[1]:.2f}")
+
+    def pay_order(self):
+        """Registra el pago del pedido seleccionado."""
+        sel = self.unpaid_tree.selection()
+        if not sel:
+            messagebox.showwarning('Aviso', 'Seleccione un pedido para cobrar')
+            return
+        
+        if not self.session_id:
+            messagebox.showwarning('Caja', 'Debe abrir la caja antes de procesar pagos')
+            return
+
+        item = self.unpaid_tree.item(sel[0])
+        order_id = item['values'][0]
+        
+        if messagebox.askyesno('Confirmar Pago', '¿Confirmar el pago de esta cuenta?'):
+            try:
+                self.db.execute('UPDATE pedidos SET pagado = 1, sesion_id = ?, metodo_pago = ? WHERE id = ?', 
+                                (self.session_id, 'EFECTIVO', order_id))
+                messagebox.showinfo('Éxito', 'Pago procesado correctamente')
+                self.refresh_unpaid_orders()
+                self.detail_text.config(state='normal')
+                self.detail_text.delete('1.0', 'end')
+                self.detail_text.config(state='disabled')
+                self.total_cobro_label.config(text="Total a Cobrar: $0.00")
+            except Exception as e:
+                logging.error(f"Error al procesar pago: {e}")
+                messagebox.showerror('Error', 'No se pudo procesar el pago')
 
     def render_products(self):
         """Genera dinámicamente las tarjetas de productos según la categoría."""
@@ -630,6 +722,7 @@ class POSFrame(ttk.Frame):
         
         self.show_report(reporte)
         self.session_id = None
+        # Eliminar llamada duplicada a show_report
 
     def show_report(self, text):
         """Muestra una pantalla con el resumen del cierre de caja."""
@@ -643,6 +736,146 @@ class POSFrame(ttk.Frame):
         t.config(state='disabled')
         t.pack(pady=10)
         ttk.Button(frm, text='Regresar al Menú', command=self.render_products, bootstyle="info").pack(pady=10)
+
+
+class MeseroFrame(ttk.Frame):
+    """
+    Interfaz para Meseros.
+    Permite realizar pedidos asignados a mesas o para llevar.
+    """
+    def __init__(self, parent, db: DatabaseManager, *args, **kwargs):
+        user = kwargs.pop('user', None)
+        super().__init__(parent, padding=10, *args, **kwargs)
+        self.db = db
+        self.user = user
+        self.cart = []
+        self.selected_mesa = tk.StringVar(value="Mesa 1")
+        
+        # --- Cabecera ---
+        header = ttk.Frame(self, bootstyle="warning", padding=15)
+        header.pack(fill='x')
+        
+        mesero_img = load_image(os.path.join('Imagenes', 'user.png'), size=(60, 60))
+        if mesero_img:
+            lbl = ttk.Label(header, image=mesero_img, bootstyle="inverse-warning")
+            lbl.image = mesero_img
+            lbl.pack(side='left', padx=10)
+        
+        ttk.Label(header, text='🍽️ MÓDULO DE MESERO', font=(None, 24, 'bold'), bootstyle="inverse-warning").pack(side='left', padx=10)
+        ttk.Button(header, text='Regresar', command=lambda: self.master.select(0), bootstyle="secondary-outline", cursor="hand2", padding=10).pack(side='right', padx=5)
+
+        # --- Cuerpo ---
+        body = ttk.Frame(self)
+        body.pack(fill='both', expand=True, pady=10)
+
+        # Lado izquierdo: Mesas y Productos
+        left = ttk.Frame(body)
+        left.pack(side='left', fill='both', expand=True, padx=(0, 10))
+
+        # Selección de Mesa / Para Llevar
+        mesa_frame = ttk.LabelFrame(left, text="Seleccionar Mesa / Destino")
+        mesa_frame.pack(fill='x', pady=(0, 15), padx=10)
+        
+        mesas = ["Mesa 1", "Mesa 2", "Mesa 3", "Mesa 4", "Mesa 5", "Mesa 6", "Para Llevar"]
+        for m in mesas:
+            ttk.Radiobutton(mesa_frame, text=m, variable=self.selected_mesa, value=m, 
+                           bootstyle="warning-toolbutton", padding=8).pack(side='left', padx=5)
+
+        # Filtro de categorías
+        self.categories = ['🍔 Combos', '🍟 Extras', '🥤 Bebidas']
+        self.selected_category = tk.StringVar(value=self.categories[0])
+        cat_frame = ttk.Frame(left)
+        cat_frame.pack(fill='x', pady=(0, 15))
+        for c in self.categories:
+            ttk.Radiobutton(cat_frame, text=c, variable=self.selected_category, value=c, 
+                           command=self.render_products, bootstyle="warning-outline-toolbutton", padding=10).pack(side='left', padx=5)
+
+        # Contenedor de productos
+        self.products_canvas = tk.Canvas(left, bg=BG, highlightthickness=0)
+        self.scrollbar = ttk.Scrollbar(left, orient="vertical", command=self.products_canvas.yview)
+        self.products_frame = ttk.Frame(self.products_canvas)
+
+        self.products_frame.bind("<Configure>", lambda e: self.products_canvas.configure(scrollregion=self.products_canvas.bbox("all")))
+        self.products_canvas.create_window((0, 0), window=self.products_frame, anchor="nw")
+        self.products_canvas.configure(yscrollcommand=self.scrollbar.set)
+        self.products_canvas.pack(side="left", fill="both", expand=True)
+        self.scrollbar.pack(side="right", fill="y")
+
+        # Lado derecho: Resumen
+        right = ttk.Frame(body, width=350, bootstyle="secondary")
+        right.pack(side='right', fill='y')
+        right.pack_propagate(False)
+        
+        ttk.Label(right, text='PEDIDO ACTUAL', font=(None, 12, 'bold'), bootstyle="inverse-secondary", padding=10).pack(fill='x')
+        self.cart_list = tk.Listbox(right, bg=PANEL, fg=FG, font=(None, 11), bd=0, highlightthickness=0, selectbackground=ACCENT)
+        self.cart_list.pack(fill='both', expand=True, padx=10, pady=10)
+        self.total_label = ttk.Label(right, text='Total: $0.00', font=(None, 14, 'bold'), bootstyle="inverse-secondary", padding=10)
+        self.total_label.pack(fill='x')
+
+        ttk.Button(right, text='Quitar Item', command=self.remove_selected, bootstyle="danger", cursor="hand2").pack(fill='x', padx=10, pady=5)
+        ttk.Button(right, text='ENVIAR A COCINA', command=self.process_order, bootstyle="warning", cursor="hand2", padding=10).pack(fill='x', padx=10, pady=10)
+
+        self.render_products()
+
+    def render_products(self):
+        for w in self.products_frame.winfo_children(): w.destroy()
+        products = self.db.fetch_all('SELECT id, nombre, precio, categoria, emoji FROM productos_menu')
+        filtered = [p for p in products if (p[3] or '').strip() == self.selected_category.get()]
+        
+        cols = 3
+        for idx, p in enumerate(filtered):
+            r, c = divmod(idx, cols)
+            card = ttk.Frame(self.products_frame, bootstyle="light", padding=15)
+            card.grid(row=r, column=c, padx=12, pady=12, sticky='nsew')
+            ttk.Label(card, text=p[4] or '🍽', font=(None, 40), bootstyle="inverse-light").pack(pady=5)
+            ttk.Label(card, text=p[1], font=(None, 14, 'bold'), bootstyle="inverse-light", wraplength=140, justify='center').pack()
+            ttk.Label(card, text=f"${p[2]:.2f}", font=(None, 16), bootstyle="warning").pack(pady=5)
+            btn = ttk.Button(card, text='Añadir', command=lambda pid=p: self.add_product(pid), bootstyle="warning", cursor="hand2", padding=8)
+            btn.pack(fill='x')
+        for i in range(cols): self.products_frame.columnconfigure(i, weight=1)
+
+    def add_product(self, product):
+        self.cart.append(product)
+        self.update_cart_display()
+
+    def remove_selected(self):
+        sel = self.cart_list.curselection()
+        if not sel: return
+        del self.cart[sel[0]]
+        self.update_cart_display()
+
+    def update_cart_display(self):
+        self.cart_list.delete(0, 'end')
+        total = sum(p[2] for p in self.cart)
+        for p in self.cart:
+            self.cart_list.insert('end', f"{p[1]:<20} ${p[2]:>6.2f}")
+        self.total_label.config(text=f'Total: ${total:.2f}')
+
+    def process_order(self):
+        if not self.cart:
+            messagebox.showinfo('Aviso', 'El pedido está vacío')
+            return
+        
+        items_list = [{'id': p[0], 'nombre': p[1], 'precio': p[2]} for p in self.cart]
+        items = json.dumps(items_list, ensure_ascii=False)
+        total = sum(p[2] for p in self.cart)
+        mesa = self.selected_mesa.get()
+        
+        try:
+            numero = f"MES-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+            created_at = datetime.now().isoformat()
+            usuario_id = self.user.get('id') if self.user else None
+            
+            # Los pedidos de mesero se guardan como NO PAGADOS para que caja los cobre luego
+            self.db.execute('INSERT INTO pedidos (numero, items, subtotal, total, estado, canal, usuario_id, created_at, mesa, pagado) VALUES (?,?,?,?,?,?,?,?,?,?)',
+                            (numero, items, total, total, 'RECIBIDO', 'MESERO', usuario_id, created_at, mesa, 0))
+            
+            messagebox.showinfo('Éxito', f'Pedido de {mesa} enviado a cocina')
+            self.cart.clear()
+            self.update_cart_display()
+        except Exception as e:
+            logging.error(f'Error al procesar pedido mesero: {e}')
+            messagebox.showerror('Error', 'No se pudo enviar el pedido')
 
 
 class KDSFrame(ttk.Frame):
@@ -691,7 +924,7 @@ class KDSFrame(ttk.Frame):
         """Consulta la base de datos y actualiza la lista de pedidos activos."""
         self.listbox.delete(0, 'end')
         # Traer pedidos que NO tengan estado 'listo'
-        rows = self.db.fetch_all("SELECT id, numero, items, estado FROM pedidos WHERE estado!='listo' ORDER BY id DESC LIMIT 50")
+        rows = self.db.fetch_all("SELECT id, numero, items, estado, mesa FROM pedidos WHERE estado!='listo' ORDER BY id DESC LIMIT 50")
         for r in rows:
             try:
                 # Parsear el JSON de items para mostrar nombres legibles
@@ -700,7 +933,8 @@ class KDSFrame(ttk.Frame):
             except:
                 item_names = r[2] or ""
             
-            self.listbox.insert('end', f" #{r[0]:<5} | {r[3]:<12} | {item_names}")
+            mesa_info = f"[{r[4]}]" if r[4] else "[CAJA]"
+            self.listbox.insert('end', f" #{r[0]:<5} | {mesa_info:<10} | {r[3]:<12} | {item_names}")
 
     def mark_ready(self):
         """Cambia el estado de un pedido seleccionado a 'listo'."""
@@ -766,6 +1000,11 @@ class AdminFrame(ttk.Frame):
         self.notebook.add(self.security_frame, text='Seguridad')
         self.setup_security()
 
+        # 5. Pestaña de Menú / Productos
+        self.products_frame = ttk.Frame(self.notebook, padding=20)
+        self.notebook.add(self.products_frame, text='Menú / Productos')
+        self.setup_menu()
+
         self.show_admin_menu() # Mostrar el menú de cuadritos al inicio
 
     def setup_admin_menu(self):
@@ -824,7 +1063,10 @@ class AdminFrame(ttk.Frame):
         c3 = make_admin_card(cards_wrap, 'seguridad.png', 'Seguridad', 'Auditoría y respaldos de DB.', lambda: self.open_section(3, "SEGURIDAD Y AUDITORÍA"))
         c3.grid(row=0, column=2, padx=20, pady=20)
 
-        for i in range(3): cards_wrap.columnconfigure(i, weight=1)
+        c4 = make_admin_card(cards_wrap, 'pos.png', 'Menú / Productos', 'Gestión de productos y precios.', lambda: self.open_section(4, "GESTIÓN DE MENÚ"))
+        c4.grid(row=0, column=3, padx=20, pady=20)
+
+        for i in range(4): cards_wrap.columnconfigure(i, weight=1)
 
     def open_section(self, index, title):
         """Abre una sección específica y actualiza la cabecera."""
@@ -848,6 +1090,7 @@ class AdminFrame(ttk.Frame):
             if idx == 1: self.refresh_inventory()
             elif idx == 2: self.refresh_users()
             elif idx == 3: self.refresh_security()
+            elif idx == 4: self.refresh_menu()
         except: pass
 
     def setup_inventory(self):
@@ -872,8 +1115,8 @@ class AdminFrame(ttk.Frame):
         self.inv_tree.pack(fill='both', expand=True)
 
         # Panel de acciones rápidas (Ajuste de stock)
-        actions = ttk.Labelframe(self.inv_frame, text="Acciones de Ajuste Rápido", padding=15, bootstyle="success")
-        actions.pack(fill='x', pady=(20, 0))
+        actions = ttk.LabelFrame(self.inv_frame, text="Acciones de Ajuste Rápido")
+        actions.pack(fill='x', pady=(20, 0), padx=10)
         
         ttk.Label(actions, text="Seleccione un ingrediente de la tabla y use los botones para ajustar:", font=(None, 11)).pack(side='left', padx=10)
         
@@ -908,8 +1151,8 @@ class AdminFrame(ttk.Frame):
         self.user_tree.pack(fill='both', expand=True, pady=10)
         
         # Formulario para agregar nuevos usuarios
-        form = ttk.Labelframe(self.users_frame, text='Registrar Nuevo Usuario', bootstyle="success", padding=15)
-        form.pack(fill='x', pady=10)
+        form = ttk.LabelFrame(self.users_frame, text='Registrar Nuevo Usuario')
+        form.pack(fill='x', pady=10, padx=10)
         
         inputs = ttk.Frame(form)
         inputs.pack(fill='x')
@@ -943,8 +1186,8 @@ class AdminFrame(ttk.Frame):
     def setup_security(self):
         """Configura el panel de seguridad y métricas con un diseño limpio."""
         # --- Métricas de Seguridad ---
-        metrics_frame = ttk.Labelframe(self.security_frame, text="Estado de Seguridad del Sistema", padding=20, bootstyle="info")
-        metrics_frame.pack(fill='x', pady=(0, 20))
+        metrics_frame = ttk.LabelFrame(self.security_frame, text="Estado de Seguridad del Sistema")
+        metrics_frame.pack(fill='x', pady=(0, 20), padx=10)
         
         # Grid para métricas
         m_inner = ttk.Frame(metrics_frame)
@@ -1063,6 +1306,85 @@ class AdminFrame(ttk.Frame):
         except Exception as e:
             messagebox.showerror('Error', 'No se pudo actualizar el stock')
 
+    def setup_menu(self):
+        """Prepara la interfaz para gestionar los productos del menú."""
+        ttk.Label(self.products_frame, text="Gestión de Menú y Productos", font=(None, 16, 'bold')).pack(anchor='w', pady=(0, 10))
+        
+        # Tabla de productos
+        cols = ('ID', 'Nombre', 'Categoría', 'Precio', 'Emoji', 'Disponible')
+        self.menu_tree = ttk.Treeview(self.products_frame, columns=cols, show='headings', bootstyle="info", height=10)
+        for c in cols:
+            self.menu_tree.heading(c, text=c)
+            self.menu_tree.column(c, anchor='center', width=100)
+        
+        self.menu_tree.column('Nombre', anchor='w', width=200)
+        self.menu_tree.pack(fill='both', expand=True, pady=10)
+
+        # Formulario para nuevo producto
+        form = ttk.LabelFrame(self.products_frame, text='Añadir Nuevo Producto')
+        form.pack(fill='x', pady=10, padx=10)
+        
+        inputs = ttk.Frame(form)
+        inputs.pack(fill='x', padx=10, pady=10)
+        
+        ttk.Label(inputs, text='Nombre:').grid(row=0, column=0, padx=5, pady=5)
+        self.e_prod_name = ttk.Entry(inputs)
+        self.e_prod_name.grid(row=0, column=1, padx=5, pady=5, sticky='ew')
+        
+        ttk.Label(inputs, text='Precio:').grid(row=0, column=2, padx=5, pady=5)
+        self.e_prod_price = ttk.Entry(inputs)
+        self.e_prod_price.grid(row=0, column=3, padx=5, pady=5, sticky='ew')
+        
+        ttk.Label(inputs, text='Categoría:').grid(row=1, column=0, padx=5, pady=5)
+        self.e_prod_cat = ttk.Combobox(inputs, values=['🍔 Combos', '🍟 Extras', '🥤 Bebidas'])
+        self.e_prod_cat.grid(row=1, column=1, padx=5, pady=5, sticky='ew')
+        
+        ttk.Label(inputs, text='Emoji:').grid(row=1, column=2, padx=5, pady=5)
+        self.e_prod_emoji = ttk.Entry(inputs)
+        self.e_prod_emoji.grid(row=1, column=3, padx=5, pady=5, sticky='ew')
+        
+        inputs.columnconfigure((1, 3), weight=1)
+        
+        btn_frame = ttk.Frame(form)
+        btn_frame.pack(pady=10)
+        
+        ttk.Button(btn_frame, text='CREAR PRODUCTO', command=self.create_product, bootstyle="info").pack(side='left', padx=5)
+        ttk.Button(btn_frame, text='ELIMINAR SELECCIONADO', command=self.delete_product, bootstyle="danger-outline").pack(side='left', padx=5)
+
+    def refresh_menu(self):
+        """Actualiza la tabla de productos del menú."""
+        for r in self.menu_tree.get_children(): self.menu_tree.delete(r)
+        rows = self.db.fetch_all('SELECT id, nombre, categoria, precio, emoji, disponible FROM productos_menu')
+        for r in rows:
+            disp = "SÍ" if r[5] else "NO"
+            self.menu_tree.insert('', 'end', values=(r[0], r[1], r[2], f"${r[3]:.2f}", r[4], disp))
+
+    def create_product(self):
+        """Inserta un nuevo producto en el menú."""
+        n, p, c, e = self.e_prod_name.get().strip(), self.e_prod_price.get().strip(), self.e_prod_cat.get().strip(), self.e_prod_emoji.get().strip()
+        if not n or not p:
+            messagebox.showwarning('Error', 'Nombre y precio son obligatorios')
+            return
+        try:
+            self.db.execute('INSERT INTO productos_menu (nombre, precio, categoria, emoji) VALUES (?,?,?,?)', (n, float(p), c, e or '🍽'))
+            messagebox.showinfo('Éxito', 'Producto añadido al menú')
+            for entry in (self.e_prod_name, self.e_prod_price, self.e_prod_emoji): entry.delete(0, 'end')
+            self.refresh_menu()
+        except Exception as err:
+            messagebox.showerror('Error', f"No se pudo crear el producto: {err}")
+
+    def delete_product(self):
+        """Elimina el producto seleccionado."""
+        sel = self.menu_tree.selection()
+        if not sel: return
+        item_id = self.menu_tree.item(sel[0])['values'][0]
+        if messagebox.askyesno('Confirmar', '¿Eliminar este producto del menú?'):
+            try:
+                self.db.execute('DELETE FROM productos_menu WHERE id = ?', (item_id,))
+                self.refresh_menu()
+            except Exception as e:
+                messagebox.showerror('Error', f"No se pudo eliminar: {e}")
+
 
 class LoginWindow(ttk.Toplevel):
     """
@@ -1133,11 +1455,13 @@ class LoginWindow(ttk.Toplevel):
         if verify_password(stored_password, p):
             # Login exitoso
             user_data = {'id': row[0], 'username': row[1], 'rol': row[3], 'nombre_completo': row[4]}
-            # Crear sesión en el gestor de sesiones
-            self.session_token = session_manager.create_session(user_data)
-            self.user = user_data # Para compatibilidad con el código existente
+            
+            # Guardar en el master antes de destruir la ventana
+            self.master.user = user_data
+            self.master.session_token = session_manager.create_session(user_data)
+            
             try:
-                self.db.log_access(self.user['id'], self.user['username'], 'login')
+                self.db.log_access(user_data['id'], user_data['username'], 'login')
             except Exception:
                 logging.exception('Error registrando login')
             self.destroy()
@@ -1171,16 +1495,13 @@ class App(ttk.Window):
         while not self.user:
             login = LoginWindow(self, self.db)
             self.wait_window(login)
-            if getattr(login, 'user', None):
-                self.user = login.user
-                self.session_token = getattr(login, 'session_token', None)
-            else:
+            if not self.user:
                 if not messagebox.askretrycancel("Login Requerido", "¿Desea intentar iniciar sesión nuevamente?"):
                     self.destroy()
                     return
 
-        self.deiconify()
-        center_window(self, 1300, 950) # Ventana un poco más grande
+        # Construir la interfaz mientras la ventana está oculta (withdraw)
+        self.build()
         
         # Configurar navegación global por teclado
         self.bind_all('<Return>', self._on_global_return)
@@ -1188,7 +1509,11 @@ class App(ttk.Window):
         # Iniciar verificación periódica de sesión (cada 1 minuto)
         self.after(60000, self._check_session_periodically)
         
-        self.build()
+        # Ahora que está construida, posicionar y mostrar
+        self.geometry("1280x800")
+        center_window(self, 1280, 800)
+        self.state('zoomed')
+        self.deiconify()
         
         # Pie de página global con Derechos de Autor
         footer = ttk.Frame(self, bootstyle="secondary", padding=5)
@@ -1329,23 +1654,30 @@ class App(ttk.Window):
         c2 = make_card(cards_wrap, 'pos.png', 'Caja / POS', 'Ventas, cobros y pedidos.', cmd=self.open_pos, style_color="info")
         c2.grid(row=0, column=1, padx=20, pady=20)
         
-        c3 = make_card(cards_wrap, 'cocina.jpeg', 'Cocina (KDS)', 'Gestión de órdenes en cocina.', cmd=self.open_kds, style_color="warning")
+        c3 = make_card(cards_wrap, 'user.png', 'Mesero', 'Pedidos a mesa y llevar.', cmd=self.open_mesero, style_color="warning")
         c3.grid(row=0, column=2, padx=20, pady=20)
         
-        c4 = make_card(cards_wrap, 'admin.jpeg', 'Admin', 'Inventario y configuración.', cmd=self.open_admin, style_color="success")
+        c4 = make_card(cards_wrap, 'cocina.jpeg', 'Cocina (KDS)', 'Gestión de órdenes en cocina.', cmd=self.open_kds, style_color="danger")
         c4.grid(row=0, column=3, padx=20, pady=20)
+        
+        c5 = make_card(cards_wrap, 'admin.jpeg', 'Admin', 'Inventario y configuración.', cmd=self.open_admin, style_color="success")
+        c5.grid(row=0, column=4, padx=20, pady=20)
 
         # Configurar el grid para que las tarjetas se distribuyan uniformemente
-        for i in range(4):
+        for i in range(5):
             cards_wrap.columnconfigure(i, weight=1)
             cards_wrap.rowconfigure(0, weight=1)
 
         # --- Carga Dinámica de Pestañas según Rol ---
         # Solo se añaden las pestañas a las que el usuario tiene permiso de acceder.
         # IMPORTANTE: Se añadió 'administrador' y 'admin' para asegurar el acceso total.
-        if role in ('administrador', 'admin', 'mesero', 'cajera', 'supervisor'):
+        if role in ('administrador', 'admin', 'cajera', 'supervisor'):
             pos_tab = POSFrame(self.notebook, self.db, user=self.user)
             self.notebook.add(pos_tab, text='Caja / POS')
+
+        if role in ('administrador', 'admin', 'mesero', 'supervisor'):
+            mesero_tab = MeseroFrame(self.notebook, self.db, user=self.user)
+            self.notebook.add(mesero_tab, text='Mesero')
 
         if role in ('administrador', 'admin', 'cocina'):
             kds_tab = KDSFrame(self.notebook, self.db, user=self.user)
@@ -1356,8 +1688,9 @@ class App(ttk.Window):
             self.notebook.add(admin_tab, text='Admin')
 
         # --- Atajos de Teclado Globales ---
-        # CTRL + P para POS, CTRL + K para KDS, CTRL + A para Admin
-        self.bind_all('<Control-p>', lambda e: self.open_pos() if role in ('administrador','admin','mesero','cajera','supervisor') else None)
+        # CTRL + P para POS, CTRL + M para Mesero, CTRL + K para KDS, CTRL + A para Admin
+        self.bind_all('<Control-p>', lambda e: self.open_pos() if role in ('administrador','admin','cajera','supervisor') else None)
+        self.bind_all('<Control-m>', lambda e: self.open_mesero() if role in ('administrador','admin','mesero','supervisor') else None)
         self.bind_all('<Control-k>', lambda e: self.open_kds() if role in ('administrador','admin','cocina') else None)
         self.bind_all('<Control-a>', lambda e: self.open_admin() if role in ('administrador','admin','supervisor') else None)
 
@@ -1365,18 +1698,33 @@ class App(ttk.Window):
         """Cambia a la pestaña del Punto de Venta."""
         for i in range(self.notebook.index('end')):
             if self.notebook.tab(i, 'text') == 'Caja / POS':
+                frame = self.notebook.nametowidget(self.notebook.tabs()[i])
+                if hasattr(frame, 'render_products'): frame.render_products()
+                if hasattr(frame, 'refresh_unpaid_orders'): frame.refresh_unpaid_orders()
+                self.notebook.select(i); return
+
+    def open_mesero(self):
+        """Cambia a la pestaña de Mesero."""
+        for i in range(self.notebook.index('end')):
+            if self.notebook.tab(i, 'text') == 'Mesero':
+                frame = self.notebook.nametowidget(self.notebook.tabs()[i])
+                if hasattr(frame, 'render_products'): frame.render_products()
                 self.notebook.select(i); return
 
     def open_kds(self):
         """Cambia a la pestaña de Cocina."""
         for i in range(self.notebook.index('end')):
             if self.notebook.tab(i, 'text') == 'Cocina (KDS)':
+                frame = self.notebook.nametowidget(self.notebook.tabs()[i])
+                if hasattr(frame, 'refresh'): frame.refresh()
                 self.notebook.select(i); return
 
     def open_admin(self):
         """Cambia a la pestaña de Administración."""
         for i in range(self.notebook.index('end')):
             if self.notebook.tab(i, 'text') == 'Admin':
+                frame = self.notebook.nametowidget(self.notebook.tabs()[i])
+                if hasattr(frame, 'refresh'): frame.refresh()
                 self.notebook.select(i); return
 
     def logout(self):
