@@ -20,6 +20,14 @@ from ttkbootstrap.constants import PRIMARY, SUCCESS, DANGER, WARNING, INFO, LIGH
 import sqlite3
 import json
 import os
+import webbrowser
+import threading
+import multiprocessing
+try:
+    import webview
+    WEBVIEW_AVAILABLE = True
+except ImportError:
+    WEBVIEW_AVAILABLE = False
 from datetime import datetime, timedelta
 import logging
 import sys
@@ -415,6 +423,14 @@ class POSFrame(ttk.Frame):
         self.session_id = None
         self.cart = [] # Lista de productos en la orden actual
         
+        # Logo de Fondo (Marca de Agua) en POS - Usamos tk.Label para transparencia
+        bg_logo_path = os.path.join('Imagenes', 'pikta2.png')
+        self.bg_img_pos = load_image(bg_logo_path, size=(500, 500))
+        if self.bg_img_pos:
+            bg_lbl = tk.Label(self, image=self.bg_img_pos, bg=BG)
+            bg_lbl.place(relx=0.5, rely=0.5, anchor='center')
+            bg_lbl.lower()
+
         # --- Cabecera del POS con Resaltado ---
         header = ttk.Frame(self, bootstyle="info", padding=15)
         header.pack(fill='x')
@@ -443,6 +459,12 @@ class POSFrame(ttk.Frame):
         # Pestaña 1: Venta Directa
         self.tab_venta = ttk.Frame(self.pos_notebook, padding=10)
         self.pos_notebook.add(self.tab_venta, text='🛒 Venta Directa')
+
+        # Logo de Fondo en Venta Directa
+        if self.bg_img_pos:
+            bg_lbl = tk.Label(self.tab_venta, image=self.bg_img_pos, bg=BG)
+            bg_lbl.place(relx=0.5, rely=0.5, anchor='center')
+            bg_lbl.lower()
 
         # Lado izquierdo de Venta Directa: Catálogo
         left_v = ttk.Frame(self.tab_venta)
@@ -485,6 +507,12 @@ class POSFrame(ttk.Frame):
         # Pestaña 2: Cobrar Mesas
         self.tab_cobros = ttk.Frame(self.pos_notebook, padding=10)
         self.pos_notebook.add(self.tab_cobros, text='📋 Cobrar Mesas')
+        
+        # Logo de Fondo en Cobrar Mesas
+        if self.bg_img_pos:
+            bg_lbl_c = tk.Label(self.tab_cobros, image=self.bg_img_pos, bg=BG)
+            bg_lbl_c.place(relx=0.5, rely=0.5, anchor='center')
+            bg_lbl_c.lower()
         
         self.build_cobros_tab()
 
@@ -751,6 +779,14 @@ class MeseroFrame(ttk.Frame):
         self.cart = []
         self.selected_mesa = tk.StringVar(value="Mesa 1")
         
+        # Logo de Fondo (Marca de Agua) en Mesero - Usamos tk.Label para transparencia
+        bg_logo_path = os.path.join('Imagenes', 'pikta2.png')
+        self.bg_img_mes = load_image(bg_logo_path, size=(500, 500))
+        if self.bg_img_mes:
+            bg_lbl = tk.Label(self, image=self.bg_img_mes, bg=BG)
+            bg_lbl.place(relx=0.5, rely=0.5, anchor='center')
+            bg_lbl.lower()
+
         # --- Cabecera ---
         header = ttk.Frame(self, bootstyle="warning", padding=15)
         header.pack(fill='x')
@@ -771,6 +807,12 @@ class MeseroFrame(ttk.Frame):
         # Lado izquierdo: Mesas y Productos
         left = ttk.Frame(body)
         left.pack(side='left', fill='both', expand=True, padx=(0, 10))
+
+        # Logo de Fondo en Mesero (Colocado en left para visibilidad)
+        if self.bg_img_mes:
+            bg_lbl = tk.Label(left, image=self.bg_img_mes, bg=BG)
+            bg_lbl.place(relx=0.5, rely=0.5, anchor='center')
+            bg_lbl.lower()
 
         # Selección de Mesa / Para Llevar
         mesa_frame = ttk.LabelFrame(left, text="Seleccionar Mesa / Destino")
@@ -946,6 +988,110 @@ class KDSFrame(ttk.Frame):
         self.db.execute('UPDATE pedidos SET estado=? WHERE id=?', ('listo', pid))
         self.refresh() # Refrescar la lista inmediatamente
 
+
+class WhatsAppFrame(ttk.Frame):
+    """
+    Módulo de WhatsApp Web.
+    Permite la conexión y gestión de mensajes con clientes.
+    """
+    def __init__(self, parent, db: DatabaseManager, *args, **kwargs):
+        super().__init__(parent, padding=10, *args, **kwargs)
+        self.db = db
+        
+        # Logo de Fondo (Marca de Agua) en WhatsApp - Usamos tk.Label para transparencia
+        bg_logo_path = os.path.join('Imagenes', 'pikta2.png')
+        self.bg_img_wa = load_image(bg_logo_path, size=(500, 500))
+        if self.bg_img_wa:
+            bg_lbl = tk.Label(self, image=self.bg_img_wa, bg=BG)
+            bg_lbl.place(relx=0.5, rely=0.5, anchor='center')
+            bg_lbl.lower()
+
+        # --- Cabecera ---
+        header = ttk.Frame(self, bootstyle="success", padding=15)
+        header.pack(fill='x')
+        
+        wa_img = load_image(os.path.join('Imagenes', 'yappy.png'), size=(60, 60))
+        if wa_img:
+            lbl = ttk.Label(header, image=wa_img, bootstyle="inverse-success")
+            lbl.image = wa_img
+            lbl.pack(side='left', padx=10)
+        
+        ttk.Label(header, text='💬 WHATSAPP WEB PIK\'TA', font=(None, 24, 'bold'), bootstyle="inverse-success").pack(side='left', padx=10)
+        ttk.Button(header, text='Regresar', command=lambda: self.master.select(0), bootstyle="secondary-outline", cursor="hand2", padding=10).pack(side='right', padx=5)
+
+        # --- Cuerpo ---
+        body = ttk.Frame(self)
+        body.pack(fill='both', expand=True, pady=10)
+
+        # Lado izquierdo: Lista de Chats
+        left = ttk.Frame(body, width=300, bootstyle="light")
+        left.pack(side='left', fill='y', padx=(0, 10))
+        left.pack_propagate(False)
+        
+        ttk.Label(left, text='CHATS RECIENTES', font=(None, 12, 'bold'), padding=10).pack(fill='x')
+        self.chat_list = tk.Listbox(left, bg="#ffffff", fg="#333333", font=(None, 11), bd=0, highlightthickness=0)
+        self.chat_list.pack(fill='both', expand=True, padx=5, pady=5)
+        
+        # Simulación de chats
+        sample_chats = ["+507 6677-8899 (Cliente 1)", "+507 6123-4567 (Cliente 2)", "+507 6987-6543 (Cliente 3)"]
+        for chat in sample_chats:
+            self.chat_list.insert('end', chat)
+
+        # Lado derecho: Área de Mensajes
+        right = ttk.Frame(body, bootstyle="secondary")
+        right.pack(side='right', fill='both', expand=True)
+        
+        # Área de chat
+        self.chat_display = tk.Text(right, bg="#e5ddd5", state='disabled', font=(None, 12), padx=10, pady=10)
+        self.chat_display.pack(fill='both', expand=True, padx=10, pady=(10, 0))
+        
+        # Logo de Fondo en WhatsApp (Dentro del display si es posible, o detrás)
+        if self.bg_img_wa:
+            bg_lbl = tk.Label(self.chat_display, image=self.bg_img_wa, bg="#e5ddd5")
+            bg_lbl.place(relx=0.5, rely=0.5, anchor='center')
+            bg_lbl.lower()
+        
+        # Entrada de mensaje
+        input_frame = ttk.Frame(right, padding=10)
+        input_frame.pack(fill='x')
+        
+        self.msg_entry = ttk.Entry(input_frame, font=(None, 12))
+        self.msg_entry.pack(side='left', fill='x', expand=True, padx=(0, 10))
+        
+        ttk.Button(input_frame, text='Enviar', bootstyle="success", command=self.send_message).pack(side='right')
+
+        # Botón de conexión (Real)
+        ttk.Button(left, text='ABRIR WHATSAPP WEB', bootstyle="success", command=self.connect_wa, padding=10).pack(fill='x', padx=10, pady=10)
+        
+        ttk.Label(left, text="Nota: Se abrirá en su navegador\npara mayor seguridad.", font=(None, 9), bootstyle="secondary", justify='center').pack(pady=5)
+
+    def connect_wa(self):
+        """Abre WhatsApp Web de forma integrada y silenciosa."""
+        try:
+            script_path = os.path.join(os.getcwd(), 'whatsapp_launcher.py')
+            if os.path.exists(script_path):
+                import subprocess
+                # Usamos CREATE_NO_WINDOW para que no aparezca el CMD negro
+                # Usamos DETACHED_PROCESS para que sea independiente
+                DETACHED_PROCESS = 0x00000008
+                CREATE_NO_WINDOW = 0x08000000
+                
+                subprocess.Popen([sys.executable, script_path], 
+                               creationflags=DETACHED_PROCESS | CREATE_NO_WINDOW,
+                               close_fds=True)
+            else:
+                webbrowser.open("https://web.whatsapp.com/")
+        except Exception as e:
+            logging.error(f"Error al lanzar WhatsApp silencioso: {e}")
+            webbrowser.open("https://web.whatsapp.com/")
+
+    def send_message(self):
+        msg = self.msg_entry.get().strip()
+        if msg:
+            self.chat_display.config(state='normal')
+            self.chat_display.insert('end', f"Tú: {msg}\n", "sent")
+            self.chat_display.config(state='disabled')
+            self.msg_entry.delete(0, 'end')
 
 class AdminFrame(ttk.Frame):
     """
@@ -1397,30 +1543,31 @@ class LoginWindow(ttk.Toplevel):
         self.user = None # Guardará los datos del usuario si el login es exitoso
         self.title('Login - SISTEMA POS PIK\'TA')
         self.resizable(False, False)
-        center_window(self, 400, 500)
+        # Aumentar tamaño de la ventana de login para que se aprecie mejor
+        center_window(self, 500, 700)
         self.grab_set() # Bloquea interacción con la ventana principal hasta que se cierre esta
 
         container = ttk.Frame(self, padding=30)
         container.pack(fill='both', expand=True)
 
-        # Logo de la empresa en el login
-        logo_path = os.path.join('Imagenes', 'pikata.png')
-        self.logo_img = load_image(logo_path, size=(120, 120))
+        # Logo de la empresa en el login - Aumentado para mejor visualización
+        logo_path = os.path.join('Imagenes', 'pikta2.png')
+        self.logo_img = load_image(logo_path, size=(200, 200))
         if self.logo_img:
             logo_lbl = ttk.Label(container, image=self.logo_img)
             logo_lbl.pack(pady=(0, 20))
         
-        ttk.Label(container, text='Bienvenido', font=(None, 24, 'bold')).pack(pady=10)
-        ttk.Label(container, text='Ingrese sus credenciales', font=(None, 14)).pack(pady=(0, 30))
+        ttk.Label(container, text='Bienvenido', font=(None, 28, 'bold')).pack(pady=10)
+        ttk.Label(container, text='Ingrese sus credenciales', font=(None, 16)).pack(pady=(0, 30))
 
         # Campo de Usuario con fuente más grande
-        self.username = ttk.Entry(container, font=(None, 14), bootstyle="info")
+        self.username = ttk.Entry(container, font=(None, 16), bootstyle="info")
         self.username.pack(fill='x', pady=10)
         self.username.insert(0, 'Usuario')
         self.username.bind('<FocusIn>', lambda e: self.username.delete(0, 'end') if self.username.get() == 'Usuario' else None)
 
         # Campo de Contraseña con fuente más grande
-        self.password = ttk.Entry(container, show='*', font=(None, 14), bootstyle="info")
+        self.password = ttk.Entry(container, show='*', font=(None, 16), bootstyle="info")
         self.password.pack(fill='x', pady=10)
 
         # Botones de login y cancelación más grandes
@@ -1566,22 +1713,55 @@ class App(ttk.Window):
         role = self.user.get('rol', '').lower()
 
         # --- Dashboard (Pestaña Inicial) ---
-        home = ttk.Frame(self.notebook, padding=30)
+        home = tk.Frame(self.notebook, bg=BG)
         self.notebook.add(home, text='Inicio')
         self.notebook.select(home)
 
-        # Logo de Fondo (Marca de Agua)
-        bg_logo_path = os.path.join('Imagenes', 'pikata.png')
-        self.bg_img = load_image(bg_logo_path, size=(400, 400))
-        if self.bg_img:
-            # Crear un Label que contenga el logo y ponerlo al fondo
-            bg_lbl = ttk.Label(home, image=self.bg_img) 
-            bg_lbl.place(relx=0.5, rely=0.5, anchor='center')
-            # Aseguramos que el logo esté detrás de los cuadritos
-            bg_lbl.lower()
+        # Usamos un Canvas que ocupe TODO el espacio disponible
+        self.dash_canvas = tk.Canvas(home, bg=BG, highlightthickness=0)
+        self.dash_canvas.pack(fill='both', expand=True)
 
-        cards_wrap = ttk.Frame(home)
-        cards_wrap.pack(fill='both', expand=True)
+        # Cargar logo de fondo (Agua)
+        bg_logo_path = os.path.join('Imagenes', 'pikta2.png')
+        if os.path.exists(bg_logo_path) and PIL_AVAILABLE:
+            # Guardamos la imagen original para redimensionar sin perder calidad
+            self.bg_image_raw = Image.open(bg_logo_path)
+            self.bg_photo = None # Se generará dinámicamente
+            
+            def update_background(e):
+                # Redimensionar para cubrir todo el canvas (STRETCH)
+                cw, ch = self.dash_canvas.winfo_width(), self.dash_canvas.winfo_height()
+                if cw < 10 or ch < 10: return
+                
+                # Redimensionar imagen al tamaño actual del canvas
+                img_resized = self.bg_image_raw.resize((cw, ch), Image.LANCZOS)
+                self.bg_photo = ImageTk.PhotoImage(img_resized)
+                
+                self.dash_canvas.delete("bg_img")
+                # Dibujamos la imagen centrada cubriendo todo el canvas
+                self.dash_canvas.create_image(cw//2, ch//2, image=self.bg_photo, tags="bg_img")
+                # Aseguramos que el logo esté detrás de todo lo que se ponga en el canvas
+                self.dash_canvas.tag_lower("bg_img")
+            
+            # El evento Configure se dispara al cambiar el tamaño de la ventana
+            self.dash_canvas.bind("<Configure>", update_background)
+
+        # Contenedor para las tarjetas (dentro del canvas como una ventana)
+        # IMPORTANTE: El fondo de cards_content debe ser el mismo que el del canvas para "transparencia"
+        cards_content = tk.Frame(self.dash_canvas, bg=BG)
+        # Colocamos el contenedor de tarjetas centrado sobre el canvas
+        self.dash_canvas.create_window(0, 0, window=cards_content, anchor="nw", tags="cards_win")
+        
+        def resize_cards_layer(e):
+            # Hacer que el layer de tarjetas ocupe todo el canvas
+            self.dash_canvas.itemconfig("cards_win", width=e.width, height=e.height)
+        
+        self.dash_canvas.bind("<Configure>", lambda e: (update_background(e), resize_cards_layer(e)), add="+")
+
+        # El contenido real de las tarjetas se centra dentro de cards_content
+        # Usamos un Frame interno para agrupar las tarjetas y centrarlo
+        cards_inner = tk.Frame(cards_content, bg=BG)
+        cards_inner.place(relx=0.5, rely=0.5, anchor='center')
 
         def make_card(parent, img_name, title, desc, cmd=None, style_color="info"):
             """Crea una tarjeta interactiva para el dashboard principal (más grande y atractiva)."""
@@ -1646,31 +1826,34 @@ class App(ttk.Window):
             
             return card
 
-        # Generación de tarjetas en el grid (Sin sticky para que mantengan su tamaño fijo)
-        # Se crean 4 tarjetas principales: Simulador, POS, KDS y Admin
-        c1 = make_card(cards_wrap, 'avion.jpeg', 'Simulador', 'Vista de flujos y procesos.', cmd=lambda: self.notebook.select(0), style_color="secondary")
+        # Generación de tarjetas en el grid
+        c1 = make_card(cards_inner, 'WhatsApp.jpg', 'WhatsApp Web', 'Gestión de clientes y pedidos.', cmd=self.open_whatsapp, style_color="success")
         c1.grid(row=0, column=0, padx=20, pady=20)
         
-        c2 = make_card(cards_wrap, 'pos.png', 'Caja / POS', 'Ventas, cobros y pedidos.', cmd=self.open_pos, style_color="info")
+        c2 = make_card(cards_inner, 'pos.png', 'Caja / POS', 'Ventas, cobros y pedidos.', cmd=self.open_pos, style_color="info")
         c2.grid(row=0, column=1, padx=20, pady=20)
         
-        c3 = make_card(cards_wrap, 'user.png', 'Mesero', 'Pedidos a mesa y llevar.', cmd=self.open_mesero, style_color="warning")
+        c3 = make_card(cards_inner, 'user.png', 'Mesero', 'Pedidos a mesa y llevar.', cmd=self.open_mesero, style_color="warning")
         c3.grid(row=0, column=2, padx=20, pady=20)
         
-        c4 = make_card(cards_wrap, 'cocina.jpeg', 'Cocina (KDS)', 'Gestión de órdenes en cocina.', cmd=self.open_kds, style_color="danger")
+        c4 = make_card(cards_inner, 'cocina.jpeg', 'Cocina (KDS)', 'Gestión de órdenes en cocina.', cmd=self.open_kds, style_color="danger")
         c4.grid(row=0, column=3, padx=20, pady=20)
         
-        c5 = make_card(cards_wrap, 'admin.jpeg', 'Admin', 'Inventario y configuración.', cmd=self.open_admin, style_color="success")
+        c5 = make_card(cards_inner, 'admin.jpeg', 'Admin', 'Inventario y configuración.', cmd=self.open_admin, style_color="primary")
         c5.grid(row=0, column=4, padx=20, pady=20)
 
         # Configurar el grid para que las tarjetas se distribuyan uniformemente
         for i in range(5):
-            cards_wrap.columnconfigure(i, weight=1)
-            cards_wrap.rowconfigure(0, weight=1)
+            cards_inner.columnconfigure(i, weight=1)
+            cards_inner.rowconfigure(0, weight=1)
 
         # --- Carga Dinámica de Pestañas según Rol ---
         # Solo se añaden las pestañas a las que el usuario tiene permiso de acceder.
         # IMPORTANTE: Se añadió 'administrador' y 'admin' para asegurar el acceso total.
+        if role in ('administrador', 'admin', 'supervisor'):
+            whatsapp_tab = WhatsAppFrame(self.notebook, self.db)
+            self.notebook.add(whatsapp_tab, text='WhatsApp Web')
+
         if role in ('administrador', 'admin', 'cajera', 'supervisor'):
             pos_tab = POSFrame(self.notebook, self.db, user=self.user)
             self.notebook.add(pos_tab, text='Caja / POS')
@@ -1688,11 +1871,23 @@ class App(ttk.Window):
             self.notebook.add(admin_tab, text='Admin')
 
         # --- Atajos de Teclado Globales ---
-        # CTRL + P para POS, CTRL + M para Mesero, CTRL + K para KDS, CTRL + A para Admin
+        # CTRL + W para WhatsApp, CTRL + P para POS, CTRL + M para Mesero, CTRL + K para KDS, CTRL + A para Admin
+        self.bind_all('<Control-w>', lambda e: self.open_whatsapp() if role in ('administrador','admin','supervisor') else None)
         self.bind_all('<Control-p>', lambda e: self.open_pos() if role in ('administrador','admin','cajera','supervisor') else None)
         self.bind_all('<Control-m>', lambda e: self.open_mesero() if role in ('administrador','admin','mesero','supervisor') else None)
         self.bind_all('<Control-k>', lambda e: self.open_kds() if role in ('administrador','admin','cocina') else None)
         self.bind_all('<Control-a>', lambda e: self.open_admin() if role in ('administrador','admin','supervisor') else None)
+
+    def open_whatsapp(self):
+        """Cambia a la pestaña de WhatsApp Web y lanza automáticamente la ventana integrada."""
+        for i in range(self.notebook.index('end')):
+            if self.notebook.tab(i, 'text') == 'WhatsApp Web':
+                frame = self.notebook.nametowidget(self.notebook.tabs()[i])
+                self.notebook.select(i)
+                # Lanzar WhatsApp automáticamente al entrar
+                if hasattr(frame, 'connect_wa'):
+                    frame.connect_wa()
+                return
 
     def open_pos(self):
         """Cambia a la pestaña del Punto de Venta."""
@@ -1745,6 +1940,7 @@ class App(ttk.Window):
 # PUNTO DE ENTRADA DEL PROGRAMA
 # =============================================================================
 if __name__ == '__main__':
+    multiprocessing.freeze_support()
     # Crear e iniciar la aplicación principal
     app = App()
     app.mainloop()

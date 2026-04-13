@@ -2283,3 +2283,9 @@ Traceback (most recent call last):
         (widgetName, self._w) + extra + self._options(cnf))
         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 _tkinter.TclError: unknown option "-padding"
+2026-04-13 14:14:05,939 - ERROR - Error al iniciar webview: pywebview must be run on a main thread.
+2026-04-13 14:21:52,806 - ERROR - Error al lanzar proceso de webview: Can't get local object 'WhatsAppFrame.connect_wa.<locals>.start_webview_process'
+2026-04-13 14:21:52,807 - ERROR - Error en proceso de webview: pywebview must be run on a main thread.
+2026-04-13 14:25:43,525 - ERROR - Error al iniciar webview: pywebview must be run on a main thread.
+2026-04-13 14:26:11,683 - ERROR - Error al iniciar webview: pywebview must be run on a main thread.
+2026-04-13 14:28:57,202 - ERROR - Error crítico al lanzar webview: pywebview must be run on a main thread.
