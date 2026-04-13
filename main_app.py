@@ -1759,109 +1759,68 @@ class App(ttk.Window):
         # Cargar logo de fondo para el dashboard
         if os.path.exists(bg_logo_path) and PIL_AVAILABLE:
             self.bg_image_raw = Image.open(bg_logo_path)
-            def draw_dashboard_bg(e):
-                home.delete("bg")
-                cw, ch = e.width, e.height
+            
+            def render_dashboard(e=None):
+                home.delete("all")
+                cw = home.winfo_width()
+                ch = home.winfo_height()
                 if cw < 10 or ch < 10: return
+
+                # 1. Dibujar el logo de fondo
                 img_res = self.bg_image_raw.resize((cw, ch), Image.LANCZOS)
                 home.bg_img = ImageTk.PhotoImage(img_res)
                 home.create_image(cw//2, ch//2, image=home.bg_img, tags="bg")
-                home.tag_lower("bg")
-            
-            home.bind("<Configure>", draw_dashboard_bg)
 
-        # Contenedor para las tarjetas - Centrado sobre el canvas
-        cards_inner = tk.Frame(home, bg=BG) # Mismo color que el fondo para disimular
-        home.create_window(0, 0, window=cards_inner, anchor='center', tags="cards")
-        
-        def center_cards(e):
-            home.coords("cards", e.width//2, e.height//2)
-        
-        home.bind("<Configure>", lambda e: (draw_dashboard_bg(e), center_cards(e)), add="+")
+                # 2. Dibujar las tarjetas (Simuladas en el Canvas para transparencia real)
+                cards_data = [
+                    ('WhatsApp.jpg', 'WhatsApp Web', 'Gestión de clientes.', self.open_whatsapp, SUCCESS),
+                    ('pos.png', 'Caja / POS', 'Ventas y cobros.', self.open_pos, INFO),
+                    ('user.png', 'Mesero', 'Pedidos a mesa.', self.open_mesero, WARNING),
+                    ('cocina.jpeg', 'Cocina (KDS)', 'Gestión de órdenes.', self.open_kds, DANGER),
+                    ('admin.jpeg', 'Admin', 'Configuración.', self.open_admin, PRIMARY)
+                ]
 
-        def make_card(parent, img_name, title, desc, cmd=None, style_color="info"):
-            """Crea una tarjeta interactiva para el dashboard principal (más grande y atractiva)."""
-            # El contenedor principal 'card' tiene un padding que simula el borde
-            card = ttk.Frame(parent, bootstyle="secondary", padding=2, cursor="hand2", takefocus=True, width=220, height=260)
-            card.pack_propagate(False)
-            card._card_cmd = cmd
-            
-            # El contenedor interno 'inner' para el contenido real
-            inner = ttk.Frame(card, padding=10) 
-            inner.pack(fill='both', expand=True)
+                n_cards = len(cards_data)
+                card_w, card_h = 220, 260
+                gap = 30
+                total_w = (card_w * n_cards) + (gap * (n_cards - 1))
+                start_x = (cw - total_w) // 2
+                start_y = (ch - card_h) // 2
 
-            img = None
-            if img_name:
-                path = os.path.join('Imagenes', img_name)
-                img = load_image(path, size=(90, 90)) # Imagen un poco más grande
-            
-            if img:
-                lbl = ttk.Label(inner, image=img)
-                lbl.image = img
-                lbl.pack(pady=10)
-                lbl.bind("<Button-1>", lambda e: cmd() if cmd else None)
-            else:
-                lbl = ttk.Label(inner, text='📦', font=(None, 45))
-                lbl.pack(pady=10)
-                lbl.bind("<Button-1>", lambda e: cmd() if cmd else None)
+                for i, (img_name, title, desc, cmd, color) in enumerate(cards_data):
+                    x = start_x + (card_w + gap) * i
+                    y = start_y
+                    
+                    # Tag único para cada tarjeta
+                    tag = f"card_{i}"
+                    
+                    # Dibujar borde de la tarjeta (transparente por dentro)#
+                    home.create_rectangle(x, y, x + card_w, y + card_h, 
+                                        outline="#7975A0", width=2, tags=(tag, "card_rect"))
+                    
+                    # Cargar e insertar imagen
+                    img_path = os.path.join('Imagenes', img_name)
+                    card_icon = load_image(img_path, size=(90, 90))
+                    if card_icon:
+                        # Guardar referencia para que no se pierda
+                        if not hasattr(home, 'icons'): home.icons = {}
+                        home.icons[tag] = card_icon
+                        home.create_image(x + card_w//2, y + 60, image=card_icon, tags=(tag, "icon"))
+                    
+                    # Título#
+                    home.create_text(x + card_w//2, y + 140, text=title, fill="#287F1E",
+                                   font=(None, 18, 'bold'), width=200, justify='center', tags=(tag, "title"))
+                    
+                    # Descripción#
+                    home.create_text(x + card_w//2, y + 200, text=desc, fill="#287F1E",
+                                   font=(None, 14), width=180, justify='center', tags=(tag, "desc"))
 
-            # Título llamativo
-            t_lbl = ttk.Label(inner, text=title, font=(None, 24, 'bold'), wraplength=200, justify='center') 
-            t_lbl.pack(pady=5)
-            t_lbl.bind("<Button-1>", lambda e: cmd() if cmd else None)
+                    # Hacer que toda la zona sea interactiva
+                    home.tag_bind(tag, "<Button-1>", lambda e, c=cmd: c())
+                    home.tag_bind(tag, "<Enter>", lambda e, t=tag, col=color: (home.itemconfig(t, outline=col, width=4), home.config(cursor="hand2")))
+                    home.tag_bind(tag, "<Leave>", lambda e, t=tag: (home.itemconfig(t, outline='#000000', width=2), home.config(cursor="")))
 
-            # Descripción legible
-            d_lbl = ttk.Label(inner, text=desc, wraplength=180, justify='center', font=(None, 12))
-            d_lbl.pack(pady=5, fill='both', expand=True)
-            d_lbl.bind("<Button-1>", lambda e: cmd() if cmd else None)
-
-            # --- Efecto 3D / Pop-out ---
-            # Al pasar el mouse, el borde se vuelve más grueso y brillante (simulando que sale hacia el frente)
-            def on_enter(e):
-                card.configure(bootstyle=style_color, padding=5) # Borde grueso (Pop-out)
-                inner.configure(bootstyle="light") # Fondo más claro para resaltar
-                t_lbl.configure(bootstyle=f"inverse-light")
-                d_lbl.configure(bootstyle=f"inverse-light")
-            
-            def on_leave(e):
-                card.configure(bootstyle="secondary", padding=2) # Vuelve a la normalidad
-                inner.configure(bootstyle="default")
-                t_lbl.configure(bootstyle="default")
-                d_lbl.configure(bootstyle="default")
-
-            def on_focus_in(e): on_enter(None)
-            def on_focus_out(e): on_leave(None)
-
-            # Vincular eventos
-            card.bind("<Enter>", on_enter); card.bind("<Leave>", on_leave)
-            card.bind("<FocusIn>", on_focus_in); card.bind("<FocusOut>", on_focus_out)
-            
-            # Clic en cualquier parte activa el comando
-            card.bind("<Button-1>", lambda e: cmd() if cmd else None)
-            inner.bind("<Button-1>", lambda e: cmd() if cmd else None)
-            
-            return card
-
-        # Generación de tarjetas en el grid
-        c1 = make_card(cards_inner, 'WhatsApp.jpg', 'WhatsApp Web', 'Gestión de clientes y pedidos.', cmd=self.open_whatsapp, style_color="success")
-        c1.grid(row=0, column=0, padx=20, pady=20)
-        
-        c2 = make_card(cards_inner, 'pos.png', 'Caja / POS', 'Ventas, cobros y pedidos.', cmd=self.open_pos, style_color="info")
-        c2.grid(row=0, column=1, padx=20, pady=20)
-        
-        c3 = make_card(cards_inner, 'user.png', 'Mesero', 'Pedidos a mesa y llevar.', cmd=self.open_mesero, style_color="warning")
-        c3.grid(row=0, column=2, padx=20, pady=20)
-        
-        c4 = make_card(cards_inner, 'cocina.jpeg', 'Cocina (KDS)', 'Gestión de órdenes en cocina.', cmd=self.open_kds, style_color="danger")
-        c4.grid(row=0, column=3, padx=20, pady=20)
-        
-        c5 = make_card(cards_inner, 'admin.jpeg', 'Admin', 'Inventario y configuración.', cmd=self.open_admin, style_color="primary")
-        c5.grid(row=0, column=4, padx=20, pady=20)
-
-        # Configurar el grid para que las tarjetas se distribuyan uniformemente
-        for i in range(5):
-            cards_inner.columnconfigure(i, weight=1)
-            cards_inner.rowconfigure(0, weight=1)
+            home.bind("<Configure>", lambda e: render_dashboard())
 
         # --- Carga Dinámica de Pestañas según Rol ---
         # Solo se añaden las pestañas a las que el usuario tiene permiso de acceder.
