@@ -2325,3 +2325,49 @@ Traceback (most recent call last):
     if self.bg_img_pos:
        ^^^^^^^^^^^^^^^
 AttributeError: 'POSFrame' object has no attribute 'bg_img_pos'
+2026-04-13 15:00:16,355 - ERROR - Excepción no capturada
+Traceback (most recent call last):
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\main_app.py", line 1959, in <module>
+    app = App()
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\main_app.py", line 1682, in __init__
+    self.build()
+    ~~~~~~~~~~^^
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\main_app.py", line 1759, in build
+    if os.path.exists(bg_logo_path) and PIL_AVAILABLE:
+                      ^^^^^^^^^^^^
+NameError: name 'bg_logo_path' is not defined
+2026-04-13 15:02:14,364 - ERROR - Excepción no capturada
+Traceback (most recent call last):
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\main_app.py", line 1959, in <module>
+    app = App()
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\main_app.py", line 1682, in __init__
+    self.build()
+    ~~~~~~~~~~^^
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\main_app.py", line 1759, in build
+    if os.path.exists(bg_logo_path) and PIL_AVAILABLE:
+                      ^^^^^^^^^^^^
+NameError: name 'bg_logo_path' is not defined
+2026-04-13 15:02:43,068 - ERROR - Excepción no capturada
+Traceback (most recent call last):
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\main_app.py", line 1959, in <module>
+    app = App()
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\main_app.py", line 1682, in __init__
+    self.build()
+    ~~~~~~~~~~^^
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\main_app.py", line 1759, in build
+    if os.path.exists(bg_logo_path) and PIL_AVAILABLE:
+                      ^^^^^^^^^^^^
+NameError: name 'bg_logo_path' is not defined
+2026-04-13 15:03:53,304 - ERROR - Excepción no capturada
+Traceback (most recent call last):
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\main_app.py", line 1961, in <module>
+    app = App()
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\main_app.py", line 1682, in __init__
+    self.build()
+    ~~~~~~~~~~^^
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\main_app.py", line 1878, in build
+    mesero_tab = MeseroFrame(self.notebook, self.db, user=self.user)
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\main_app.py", line 865, in __init__
+    right = ttk.Frame(body, width=350, bootstyle="secondary")
+                      ^^^^
+NameError: name 'body' is not defined. Did you mean: 'self.body'?

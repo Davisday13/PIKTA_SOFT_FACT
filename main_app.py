@@ -437,37 +437,43 @@ class POSFrame(tk.Canvas):
                 self.tag_lower("bg")
             self.bind("<Configure>", draw_pos_bg)
 
-        # Contenedor principal para los widgets
-        self.main_container = ttk.Frame(self)
-        self.create_window(0, 0, window=self.main_container, anchor='nw', tags="main_win")
+        # --- Contenedores para Secciones (Sin main_container que tape todo) ---
+        # Cabecera - Flota sobre el canvas
+        self.header = ttk.Frame(self, bootstyle="info", padding=15)
+        self.header_win = self.create_window(0, 0, window=self.header, anchor='nw', tags="header")
+        
+        # Cuerpo - Pestañas de POS
+        self.body = ttk.Frame(self, padding=10)
+        self.body_win = self.create_window(0, 70, window=self.body, anchor='nw', tags="body")
         
         def resize_pos_content(e):
-            self.itemconfig("main_win", width=e.width, height=e.height)
-        self.bind("<Configure>", lambda e: (draw_pos_bg(e) if hasattr(self, 'bg_raw') else None, resize_pos_content(e)), add="+")
+            # Ajustar anchos de las ventanas del canvas
+            self.itemconfig("header", width=e.width)
+            self.itemconfig("body", width=e.width, height=e.height - 70)
+            if hasattr(self, 'bg_raw'): draw_pos_bg(e)
+            
+        self.bind("<Configure>", resize_pos_content)
 
-        # --- Cabecera del POS con Resaltado ---
-        header = ttk.Frame(self.main_container, bootstyle="info", padding=15)
-        header.pack(fill='x')
-        
+        # --- Contenido de la Cabecera ---
         # Icono decorativo del POS
         pos_img = load_image(os.path.join('Imagenes', 'pos.png'), size=(60, 60))
         if pos_img:
-            lbl = ttk.Label(header, image=pos_img, bootstyle="inverse-info")
+            lbl = ttk.Label(self.header, image=pos_img, bootstyle="inverse-info")
             lbl.image = pos_img
             lbl.pack(side='left', padx=10)
         
-        ttk.Label(header, text='🛒 PUNTO DE VENTA (Caja)', font=(None, 24, 'bold'), bootstyle="inverse-info").pack(side='left', padx=10)
+        ttk.Label(self.header, text='🛒 PUNTO DE VENTA (Caja)', font=(None, 24, 'bold'), bootstyle="inverse-info").pack(side='left', padx=10)
         
         # Botones de acción rápida en la cabecera (más grandes)
-        ttk.Button(header, text='Regresar', command=lambda: self.master.select(0), bootstyle="secondary-outline", cursor="hand2", padding=10).pack(side='right', padx=5)
+        ttk.Button(self.header, text='Regresar', command=lambda: self.master.select(0), bootstyle="secondary-outline", cursor="hand2", padding=10).pack(side='right', padx=5)
 
-        self.btn_open_caja = ttk.Button(header, text='Abrir Caja', command=self.open_caja, bootstyle="success", cursor="hand2", padding=10)
+        self.btn_open_caja = ttk.Button(self.header, text='Abrir Caja', command=self.open_caja, bootstyle="success", cursor="hand2", padding=10)
         self.btn_open_caja.pack(side='right', padx=5)
-        self.btn_close_caja = ttk.Button(header, text='Cerrar Caja', command=self.cerrar_caja, bootstyle="danger", cursor="hand2", padding=10)
+        self.btn_close_caja = ttk.Button(self.header, text='Cerrar Caja', command=self.cerrar_caja, bootstyle="danger", cursor="hand2", padding=10)
         self.btn_close_caja.pack(side='right', padx=5)
 
-        # --- Contenedor de Pestañas Internas (Venta vs Cobros) ---
-        self.pos_notebook = ttk.Notebook(self)
+        # --- Contenedor de Pestañas Internas ---
+        self.pos_notebook = ttk.Notebook(self.body)
         self.pos_notebook.pack(fill='both', expand=True, pady=10)
 
         # Pestaña 1: Venta Directa
@@ -795,33 +801,35 @@ class MeseroFrame(tk.Canvas):
                 self.tag_lower("bg")
             self.bind("<Configure>", draw_mes_bg)
 
-        # Contenedor principal
-        self.container = ttk.Frame(self)
-        self.create_window(0, 0, window=self.container, anchor='nw', tags="main_win")
+        # --- Contenedores para Secciones ---
+        # Cabecera
+        self.header = ttk.Frame(self, bootstyle="warning", padding=15)
+        self.header_win = self.create_window(0, 0, window=self.header, anchor='nw', tags="header")
+        
+        # Cuerpo
+        self.body = ttk.Frame(self, padding=10)
+        self.body_win = self.create_window(0, 70, window=self.body, anchor='nw', tags="body")
         
         def resize_mes_content(e):
-            self.itemconfig("main_win", width=e.width, height=e.height)
-        self.bind("<Configure>", lambda e: (draw_mes_bg(e) if hasattr(self, 'bg_raw') else None, resize_mes_content(e)), add="+")
+            self.itemconfig("header", width=e.width)
+            self.itemconfig("body", width=e.width, height=e.height - 70)
+            if hasattr(self, 'bg_raw'): draw_mes_bg(e)
+            
+        self.bind("<Configure>", resize_mes_content)
 
-        # --- Cabecera ---
-        header = ttk.Frame(self.container, bootstyle="warning", padding=15)
-        header.pack(fill='x')
-        
+        # --- Contenido de la Cabecera ---
         mesero_img = load_image(os.path.join('Imagenes', 'user.png'), size=(60, 60))
         if mesero_img:
-            lbl = ttk.Label(header, image=mesero_img, bootstyle="inverse-warning")
+            lbl = ttk.Label(self.header, image=mesero_img, bootstyle="inverse-warning")
             lbl.image = mesero_img
             lbl.pack(side='left', padx=10)
         
-        ttk.Label(header, text='🍽️ MÓDULO DE MESERO', font=(None, 24, 'bold'), bootstyle="inverse-warning").pack(side='left', padx=10)
-        ttk.Button(header, text='Regresar', command=lambda: self.master.select(0), bootstyle="secondary-outline", cursor="hand2", padding=10).pack(side='right', padx=5)
+        ttk.Label(self.header, text='🍽️ MÓDULO DE MESERO', font=(None, 24, 'bold'), bootstyle="inverse-warning").pack(side='left', padx=10)
+        ttk.Button(self.header, text='Regresar', command=lambda: self.master.select(0), bootstyle="secondary-outline", cursor="hand2", padding=10).pack(side='right', padx=5)
 
         # --- Cuerpo ---
-        body = ttk.Frame(self)
-        body.pack(fill='both', expand=True, pady=10)
-
         # Lado izquierdo: Mesas y Productos
-        left = ttk.Frame(body)
+        left = ttk.Frame(self.body)
         left.pack(side='left', fill='both', expand=True, padx=(0, 10))
 
         # Selección de Mesa / Para Llevar
@@ -854,7 +862,7 @@ class MeseroFrame(tk.Canvas):
         self.scrollbar.pack(side="right", fill="y")
 
         # Lado derecho: Resumen
-        right = ttk.Frame(body, width=350, bootstyle="secondary")
+        right = ttk.Frame(self.body, width=350, bootstyle="secondary")
         right.pack(side='right', fill='y')
         right.pack_propagate(False)
         
@@ -930,46 +938,64 @@ class MeseroFrame(tk.Canvas):
             messagebox.showerror('Error', 'No se pudo enviar el pedido')
 
 
-class KDSFrame(ttk.Frame):
+class KDSFrame(tk.Canvas):
     """
     Monitor de Cocina (KDS).
     Visualiza los pedidos pendientes y permite marcarlos como listos.
     """
     def __init__(self, parent, db: DatabaseManager, *args, **kwargs):
         user = kwargs.pop('user', None)
-        super().__init__(parent, padding=20, *args, **kwargs)
+        super().__init__(parent, bg=BG, highlightthickness=0, *args, **kwargs)
         self.db = db
         self.user = user
         
-        # --- Cabecera del KDS con Resaltado ---
-        header = ttk.Frame(self, bootstyle="warning", padding=15)
-        header.pack(fill='x', pady=(0, 20))
+        # Logo de Fondo en KDS
+        bg_logo_path = os.path.join('Imagenes', 'pikta2.png')
+        if os.path.exists(bg_logo_path) and PIL_AVAILABLE:
+            self.bg_raw = Image.open(bg_logo_path)
+            def draw_kds_bg(e):
+                self.delete("bg")
+                cw, ch = e.width, e.height
+                if cw < 10 or ch < 10: return
+                img_res = self.bg_raw.resize((cw, ch), Image.LANCZOS)
+                self.bg_photo = ImageTk.PhotoImage(img_res)
+                self.create_image(cw//2, ch//2, image=self.bg_photo, tags="bg")
+                self.tag_lower("bg")
+            self.bind("<Configure>", draw_kds_bg)
+
+        # --- Contenedores para Secciones ---
+        self.header = ttk.Frame(self, bootstyle="warning", padding=15)
+        self.header_win = self.create_window(0, 0, window=self.header, anchor='nw', tags="header")
         
+        self.body = ttk.Frame(self, padding=10)
+        self.body_win = self.create_window(0, 70, window=self.body, anchor='nw', tags="body")
+        
+        def resize_kds_content(e):
+            self.itemconfig("header", width=e.width)
+            self.itemconfig("body", width=e.width, height=e.height - 70)
+            if hasattr(self, 'bg_raw'): draw_kds_bg(e)
+            
+        self.bind("<Configure>", resize_kds_content)
+
+        # --- Contenido de la Cabecera ---
         kds_img = load_image(os.path.join('Imagenes', 'cocina.jpeg'), size=(60,60))
         if kds_img:
-            lbl = ttk.Label(header, image=kds_img, bootstyle="inverse-warning")
+            lbl = ttk.Label(self.header, image=kds_img, bootstyle="inverse-warning")
             lbl.image = kds_img
             lbl.pack(side='left', padx=10)
             
-        ttk.Label(header, text='🍳 MONITOR DE COCINA (KDS)', font=(None, 24, 'bold'), bootstyle="inverse-warning").pack(side='left', padx=10)
+        ttk.Label(self.header, text='🍳 MONITOR DE COCINA (KDS)', font=(None, 24, 'bold'), bootstyle="inverse-warning").pack(side='left', padx=10)
+        ttk.Button(self.header, text='Regresar', command=lambda: self.master.select(0), bootstyle="secondary-outline", cursor="hand2", padding=10).pack(side='right', padx=5)
+        ttk.Button(self.header, text='Refrescar', command=self.refresh, bootstyle="light-outline", cursor="hand2", padding=10).pack(side='right', padx=5)
         
-        # Botones de control (más grandes)
-        ttk.Button(header, text='Regresar', command=lambda: self.master.select(0), bootstyle="secondary-outline", cursor="hand2", padding=10).pack(side='right', padx=5)
-        ttk.Button(header, text='Refrescar', command=self.refresh, bootstyle="light-outline", cursor="hand2", padding=10).pack(side='right', padx=5)
-        
-        # --- Lista de Pedidos ---
-        # Listbox para ver las órdenes que aún no están 'listas' (letra más grande)
-        self.listbox = tk.Listbox(self, bg=PANEL, fg=FG, font=(None, 14), bd=0, highlightthickness=0, selectbackground=ACCENT, takefocus=True)
+        # --- Lista de Pedidos en el cuerpo ---
+        self.listbox = tk.Listbox(self.body, bg=PANEL, fg=FG, font=(None, 14), bd=0, highlightthickness=0, selectbackground=ACCENT, takefocus=True)
         self.listbox.pack(fill='both', expand=True, pady=10)
-        self.listbox.bind('<Return>', lambda e: self.mark_ready()) # Tecla ENTER para marcar listo
+        self.listbox.bind('<Return>', lambda e: self.mark_ready())
         
-        footer = ttk.Frame(self)
+        footer = ttk.Frame(self.body)
         footer.pack(fill='x', pady=10)
-        
-        # Botón grande para confirmar preparación
         ttk.Button(footer, text='MARCAR COMO LISTO', command=self.mark_ready, bootstyle="success", padding=20, cursor="hand2").pack(fill='x')
-        
-        # Cargar datos iniciales
         self.refresh()
 
     def refresh(self):
@@ -1022,32 +1048,32 @@ class WhatsAppFrame(tk.Canvas):
                 self.tag_lower("bg")
             self.bind("<Configure>", draw_wa_bg)
 
-        # Contenedor
-        self.container = ttk.Frame(self)
-        self.create_window(0, 0, window=self.container, anchor='nw', tags="main_win")
+        # --- Contenedores para Secciones ---
+        self.header = ttk.Frame(self, bootstyle="success", padding=15)
+        self.header_win = self.create_window(0, 0, window=self.header, anchor='nw', tags="header")
+        
+        self.body = ttk.Frame(self, padding=10)
+        self.body_win = self.create_window(0, 70, window=self.body, anchor='nw', tags="body")
         
         def resize_wa_content(e):
-            self.itemconfig("main_win", width=e.width, height=e.height)
-        self.bind("<Configure>", lambda e: (draw_wa_bg(e) if hasattr(self, 'bg_raw') else None, resize_wa_content(e)), add="+")
+            self.itemconfig("header", width=e.width)
+            self.itemconfig("body", width=e.width, height=e.height - 70)
+            if hasattr(self, 'bg_raw'): draw_wa_bg(e)
+            
+        self.bind("<Configure>", resize_wa_content)
 
-        # --- Cabecera ---
-        header = ttk.Frame(self.container, bootstyle="success", padding=15)
-        header.pack(fill='x')
-        
+        # --- Contenido de la Cabecera ---
         wa_img = load_image(os.path.join('Imagenes', 'WhatsApp.jpg'), size=(60, 60))
         if wa_img:
-            lbl = ttk.Label(header, image=wa_img, bootstyle="inverse-success")
+            lbl = ttk.Label(self.header, image=wa_img, bootstyle="inverse-success")
             lbl.image = wa_img
             lbl.pack(side='left', padx=10)
         
-        ttk.Label(header, text='💬 WHATSAPP BUSINESS PIK\'TA', font=(None, 24, 'bold'), bootstyle="inverse-success").pack(side='left', padx=10)
-        ttk.Button(header, text='Regresar', command=lambda: self.master.select(0), bootstyle="secondary-outline", cursor="hand2", padding=10).pack(side='right', padx=5)
+        ttk.Label(self.header, text='💬 WHATSAPP BUSINESS PIK\'TA', font=(None, 24, 'bold'), bootstyle="inverse-success").pack(side='left', padx=10)
+        ttk.Button(self.header, text='Regresar', command=lambda: self.master.select(0), bootstyle="secondary-outline", cursor="hand2", padding=10).pack(side='right', padx=5)
 
-        # --- Cuerpo Informativo (Sin chats simulados) ---
-        body = ttk.Frame(self)
-        body.pack(fill='both', expand=True, pady=10)
-        
-        info_container = tk.Frame(body, bg=BG)
+        # --- Cuerpo Informativo ---
+        info_container = tk.Frame(self.body, bg=BG)
         info_container.place(relx=0.5, rely=0.5, anchor='center')
         
         ttk.Label(info_container, text="WhatsApp Business se está ejecutando de forma integrada.", 
@@ -1075,19 +1101,44 @@ class WhatsAppFrame(tk.Canvas):
             logging.error(f"Error al lanzar WhatsApp silencioso: {e}")
             webbrowser.open("https://web.whatsapp.com/")
 
-class AdminFrame(ttk.Frame):
+class AdminFrame(tk.Canvas):
     """
     Panel de Administración con sistema de tarjetas similar al principal.
     Permite gestionar el inventario, usuarios y seguridad.
     """
     def __init__(self, parent, db: DatabaseManager, *args, **kwargs):
-        super().__init__(parent, padding=20, *args, **kwargs)
+        super().__init__(parent, bg=BG, highlightthickness=0, *args, **kwargs)
         self.db = db
         
-        # --- Cabecera del Panel Admin ---
+        # Logo de Fondo en Admin
+        bg_logo_path = os.path.join('Imagenes', 'pikta2.png')
+        if os.path.exists(bg_logo_path) and PIL_AVAILABLE:
+            self.bg_raw = Image.open(bg_logo_path)
+            def draw_adm_bg(e):
+                self.delete("bg")
+                cw, ch = e.width, e.height
+                if cw < 10 or ch < 10: return
+                img_res = self.bg_raw.resize((cw, ch), Image.LANCZOS)
+                self.bg_photo = ImageTk.PhotoImage(img_res)
+                self.create_image(cw//2, ch//2, image=self.bg_photo, tags="bg")
+                self.tag_lower("bg")
+            self.bind("<Configure>", draw_adm_bg)
+
+        # --- Contenedores para Secciones ---
         self.header = ttk.Frame(self, bootstyle="success", padding=15)
-        self.header.pack(fill='x', pady=(0, 20))
+        self.header_win = self.create_window(0, 0, window=self.header, anchor='nw', tags="header")
         
+        self.body = ttk.Frame(self, padding=10)
+        self.body_win = self.create_window(0, 70, window=self.body, anchor='nw', tags="body")
+        
+        def resize_adm_content(e):
+            self.itemconfig("header", width=e.width)
+            self.itemconfig("body", width=e.width, height=e.height - 70)
+            if hasattr(self, 'bg_raw'): draw_adm_bg(e)
+            
+        self.bind("<Configure>", resize_adm_content)
+
+        # --- Contenido de la Cabecera ---
         img = load_image(os.path.join('Imagenes', 'admin.jpeg'), size=(60,60))
         if img:
             lbl = ttk.Label(self.header, image=img, bootstyle="inverse-success")
@@ -1097,15 +1148,13 @@ class AdminFrame(ttk.Frame):
         self.title_lbl = ttk.Label(self.header, text='📊 PANEL DE ADMINISTRACIÓN', font=(None, 24, 'bold'), bootstyle="inverse-success")
         self.title_lbl.pack(side='left', padx=10)
         
-        # Botón para regresar al dashboard principal
         self.btn_back_main = ttk.Button(self.header, text='Regresar', command=lambda: self.master.select(0), bootstyle="light-outline", cursor="hand2", padding=10)
         self.btn_back_main.pack(side='right', padx=5)
         
-        # Botón para regresar al "menú de cuadritos" del admin (inicialmente oculto)
         self.btn_back_admin = ttk.Button(self.header, text='Volver al Admin', command=self.show_admin_menu, bootstyle="light-outline", cursor="hand2", padding=10)
 
-        # --- Contenedor Principal con Notebook Oculto ---
-        self.notebook = ttk.Notebook(self, style='Hidden.TNotebook')
+        # --- Contenedor Principal con Notebook Oculto en el cuerpo ---
+        self.notebook = ttk.Notebook(self.body, style='Hidden.TNotebook')
         self.notebook.pack(fill='both', expand=True)
 
         # 1. Pestaña del Menú de Tarjetas (Cuadritos)
@@ -1693,31 +1742,13 @@ class App(ttk.Window):
         self.master_bg = tk.Frame(self, bg=BG)
         self.master_bg.pack(fill='both', expand=True)
 
-        # Cargar logo de fondo (Marca de Agua Global)
-        bg_logo_path = os.path.join('Imagenes', 'pikta2.png')
-        self.bg_photo_global = None
-        
-        if os.path.exists(bg_logo_path) and PIL_AVAILABLE:
-            self.bg_image_raw = Image.open(bg_logo_path)
-            # Usamos un Label de tk que ocupe todo el espacio como base real
-            self.bg_lbl_global = tk.Label(self.master_bg, bg=BG)
-            self.bg_lbl_global.place(x=0, y=0, relwidth=1, relheight=1)
-            
-            def resize_global_bg(e):
-                cw, ch = e.width, e.height
-                if cw < 10 or ch < 10: return
-                img_resized = self.bg_image_raw.resize((cw, ch), Image.LANCZOS)
-                self.bg_photo_global = ImageTk.PhotoImage(img_resized)
-                self.bg_lbl_global.config(image=self.bg_photo_global)
-            
-            self.master_bg.bind("<Configure>", resize_global_bg)
-
         # IMPORTANTE: Para transparencia, los frames deben heredar el fondo del Label o ser transparentes
-        # Como Tkinter no tiene transparencia real de widgets, colocamos el Notebook ENCIMA del Label
+        # Como Tkinter no tiene transparencia real de widgets, cada módulo dibuja su propio logo.
         self.notebook = ttk.Notebook(self.master_bg, style='Hidden.TNotebook')
         self.notebook.place(x=0, y=0, relwidth=1, relheight=1)
 
         role = self.user.get('rol', '').lower()
+        bg_logo_path = os.path.join('Imagenes', 'pikta2.png')
 
         # --- Dashboard (Pestaña Inicial) ---
         # Usamos un Canvas como base para permitir el logo de fondo real
@@ -1727,6 +1758,7 @@ class App(ttk.Window):
 
         # Cargar logo de fondo para el dashboard
         if os.path.exists(bg_logo_path) and PIL_AVAILABLE:
+            self.bg_image_raw = Image.open(bg_logo_path)
             def draw_dashboard_bg(e):
                 home.delete("bg")
                 cw, ch = e.width, e.height
