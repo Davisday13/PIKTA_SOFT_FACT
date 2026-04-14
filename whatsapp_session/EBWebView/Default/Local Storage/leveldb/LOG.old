@@ -1,3 +1,6 @@
-2026/04/13-17:01:42.166 538c Reusing MANIFEST C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\whatsapp_session\EBWebView\Default\Local Storage\leveldb/MANIFEST-000001
-2026/04/13-17:01:42.180 538c Recovering log #4
-2026/04/13-17:01:42.186 538c Reusing old log C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\whatsapp_session\EBWebView\Default\Local Storage\leveldb/000004.log 
+2026/04/13-21:08:18.912 1310 Reusing MANIFEST C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\whatsapp_session\EBWebView\Default\Local Storage\leveldb/MANIFEST-000001
+2026/04/13-21:08:18.931 1310 Recovering log #4
+2026/04/13-21:08:18.938 1310 Reusing old log C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\whatsapp_session\EBWebView\Default\Local Storage\leveldb/000004.log 
+2026/04/13-21:08:29.005 984 Level-0 table #8: started
+2026/04/13-21:08:29.015 984 Level-0 table #8: 15384 bytes OK
+2026/04/13-21:08:29.020 984 Delete type=0 #4

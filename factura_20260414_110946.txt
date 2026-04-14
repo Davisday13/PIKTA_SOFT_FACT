@@ -1,0 +1,25 @@
+      *** PIK'TA RESTAURANTE ***      
+         Sabor que Enamora            
+--------------------------------------
+FACTURA: numeracion aleatoria por el sistema 
+FECHA:   14/04/2026 10:50:06
+MESA:    Mesa 5
+CAJERO:  Davis 
+--------------------------------------
+CANT  DESCRIPCIÓN                SUBT
+--------------------------------------
+1     Pizza Pepperoni           12.00
+1     Coca Cola 600ml            2.00
+1     Coca Cola 600ml            2.00
+1     Coca Cola 600ml            2.00
+1     Coca Cola 600ml            2.00
+--------------------------------------
+TOTAL:                     $     20.00
+RECIBIDO:                  $     20.00
+CAMBIO:                    $      0.00
+--------------------------------------
+MÉTODO DE PAGO: EFECTIVO
+--------------------------------------
+      ¡GRACIAS POR SU VISITA!         
+      www.piktarestaurante.com        
+**************************************

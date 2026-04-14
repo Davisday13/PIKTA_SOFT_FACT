@@ -1,3 +1,14 @@
-2026/04/13-18:45:11.329 4cfc Reusing MANIFEST C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\whatsapp_session\EBWebView\Default\IndexedDB\https_web.whatsapp.com_0.indexeddb.leveldb/MANIFEST-000001
-2026/04/13-18:45:11.330 4cfc Recovering log #20
-2026/04/13-18:45:11.379 4cfc Reusing old log C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\whatsapp_session\EBWebView\Default\IndexedDB\https_web.whatsapp.com_0.indexeddb.leveldb/000020.log 
+2026/04/14-14:30:31.441 2fc Reusing MANIFEST C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\whatsapp_session\EBWebView\Default\IndexedDB\https_web.whatsapp.com_0.indexeddb.leveldb/MANIFEST-000001
+2026/04/14-14:30:31.442 2fc Recovering log #20
+2026/04/14-14:30:31.564 2fc Reusing old log C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\whatsapp_session\EBWebView\Default\IndexedDB\https_web.whatsapp.com_0.indexeddb.leveldb/000020.log 
+2026/04/14-14:30:40.418 2fc Level-0 table #26: started
+2026/04/14-14:30:40.463 2fc Level-0 table #26: 1352444 bytes OK
+2026/04/14-14:30:40.465 2fc Delete type=0 #20
+2026/04/14-14:30:44.349 2fc Compacting 1@1 + 2@2 files
+2026/04/14-14:30:44.453 2fc Generated table #27@1: 47908 keys, 2234182 bytes
+2026/04/14-14:30:44.475 2fc Generated table #28@1: 8525 keys, 365551 bytes
+2026/04/14-14:30:44.475 2fc Compacted 1@1 + 2@2 files => 2599733 bytes
+2026/04/14-14:30:44.476 2fc compacted to: files[ 0 0 2 0 0 0 0 ]
+2026/04/14-14:30:44.477 2fc Delete type=2 #22
+2026/04/14-14:30:44.477 2fc Delete type=2 #23
+2026/04/14-14:30:44.477 2fc Delete type=2 #26
