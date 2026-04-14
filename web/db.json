@@ -3,7 +3,7 @@
     {
       "id": 1,
       "name": "Carne molida",
-      "stock": 2.999999999999999,
+      "stock": 2.799999999999999,
       "unit": "kg",
       "min": 5,
       "status": "BAJO"
@@ -11,7 +11,7 @@
     {
       "id": 2,
       "name": "Pan de hamburguesa",
-      "stock": 32,
+      "stock": 31,
       "unit": "u",
       "min": 40,
       "status": "BAJO"
@@ -42,5 +42,5 @@
     }
   ],
   "orders": [],
-  "sales": 1335.5
+  "sales": 1349
 }

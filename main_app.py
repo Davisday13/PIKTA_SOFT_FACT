@@ -298,10 +298,15 @@ class DatabaseManager:
             # Migraciones: Asegurar columnas nuevas
             self._ensure_column('productos_menu', 'categoria', 'TEXT')
             self._ensure_column('productos_menu', 'emoji', 'TEXT')
+            self._ensure_column('pedidos', 'subtotal', 'REAL')
+            self._ensure_column('pedidos', 'descuento', 'REAL')
             self._ensure_column('pedidos', 'canal', 'TEXT')
             self._ensure_column('pedidos', 'usuario_id', 'INTEGER')
             self._ensure_column('pedidos', 'sesion_id', 'INTEGER')
             self._ensure_column('pedidos', 'created_at', 'TEXT')
+            self._ensure_column('pedidos', 'mesa', 'TEXT')
+            self._ensure_column('pedidos', 'metodo_pago', 'TEXT')
+            self._ensure_column('pedidos', 'pagado', 'BOOLEAN')
 
             # Migración de contraseñas a formato hash si es necesario
             cur.execute("SELECT id, username, password FROM usuarios")
@@ -845,7 +850,7 @@ class POSFrame(tk.Canvas):
             # Botón para añadir al carrito (más grande)
             btn = ttk.Button(card, text='Añadir', command=lambda pid=p: self.add_product(pid), bootstyle="info", cursor="hand2", takefocus=True, padding=8)
             btn.pack(fill='x')
-            btn.bind('<Return>', lambda e, pid=p: self.add_product(pid))
+            # btn.bind('<Return>', lambda e, pid=p: self.add_product(pid)) # Redundante con global handler
             product_btns.append(btn)
             
             # Navegación por flechas entre botones de productos
@@ -1109,7 +1114,7 @@ class MeseroFrame(tk.Canvas):
             ttk.Label(card, text=f"${p[2]:.2f}", font=(None, 16), bootstyle="warning").pack(pady=5)
             btn = ttk.Button(card, text='Añadir', command=lambda pid=p: self.add_product(pid), bootstyle="warning", cursor="hand2", padding=8, takefocus=True)
             btn.pack(fill='x')
-            btn.bind('<Return>', lambda e, pid=p: self.add_product(pid))
+            # btn.bind('<Return>', lambda e, pid=p: self.add_product(pid)) # Redundante con global handler
             product_btns.append(btn)
 
             # Navegación por flechas entre botones de productos
@@ -1224,104 +1229,169 @@ class KDSFrame(tk.Canvas):
         ttk.Button(self.header, text='Refrescar', command=self.refresh, bootstyle="light-outline", cursor="hand2", padding=10).pack(side='right', padx=5)
         
         # --- Instrucciones ---
-        instr = ttk.Label(self.body, text="ENTER: Iniciar Preparación / Marcar como Finalizado", font=(None, 10, 'italic'), bootstyle="secondary")
-        instr.pack(pady=2)
+        instr = ttk.Label(self.header, text="TAB: Navegar / ENTER: Iniciar o Finalizar", font=(None, 12, 'italic'), bootstyle="inverse-warning")
+        instr.pack(side='left', padx=20)
 
-        # --- Lista de Pedidos en el cuerpo ---
-        self.listbox = tk.Listbox(self.body, bg=PANEL, fg=FG, font=(None, 14), bd=0, highlightthickness=0, selectbackground=ACCENT, takefocus=True)
-        self.listbox.pack(fill='both', expand=True, pady=10)
-        self.listbox.bind('<Return>', lambda e: self.advance_order_state())
+        # --- Área de Pedidos Scrolleable ---
+        # Usamos un Canvas con un Frame interno para las tarjetas
+        self.kds_canvas = tk.Canvas(self.body, bg=BG, highlightthickness=0)
+        self.kds_scrollbar = ttk.Scrollbar(self.body, orient="vertical", command=self.kds_canvas.yview)
+        self.cards_container = ttk.Frame(self.kds_canvas, bootstyle="dark")
         
-        footer = ttk.Frame(self.body)
-        footer.pack(fill='x', pady=10)
-        self.btn_action = ttk.Button(footer, text='AVANZAR ESTADO (ENTER)', command=self.advance_order_state, bootstyle="success", padding=20, cursor="hand2")
-        self.btn_action.pack(fill='x')
+        self.kds_canvas.create_window((0, 0), window=self.cards_container, anchor="nw", tags="inner_frame")
+        self.kds_canvas.configure(yscrollcommand=self.kds_scrollbar.set)
+        
+        self.kds_scrollbar.pack(side="right", fill="y")
+        self.kds_canvas.pack(side="left", fill="both", expand=True)
+        
+        def on_frame_configure(e):
+            self.kds_canvas.configure(scrollregion=self.kds_canvas.bbox("all"))
+            # Forzar el ancho del frame interno al del canvas
+            self.kds_canvas.itemconfig("inner_frame", width=self.kds_canvas.winfo_width())
+
+        self.cards_container.bind("<Configure>", on_frame_configure)
+        self.kds_canvas.bind("<Configure>", lambda e: self.kds_canvas.itemconfig("inner_frame", width=e.width))
+
         self.refresh()
 
     def refresh(self):
-        """Consulta la base de datos y actualiza la lista de pedidos activos."""
-        self.listbox.delete(0, 'end')
+        """Consulta la base de datos y renderiza tarjetas para cada pedido activo (estilo WEB)."""
+        # Guardar qué ID tenía el foco antes de limpiar
+        focused_widget = self.focus_get()
+        last_focused_id = getattr(focused_widget, '_order_id', None) if focused_widget else None
+
+        # Limpiar tarjetas actuales
+        for widget in self.cards_container.winfo_children():
+            widget.destroy()
+
         # Traer pedidos que NO tengan estado 'LISTO'
-        rows = self.db.fetch_all("SELECT id, numero, items, estado, mesa FROM pedidos WHERE estado NOT IN ('LISTO', 'CANCELADO') ORDER BY id DESC LIMIT 50")
+        rows = self.db.fetch_all("SELECT id, numero, items, estado, mesa, created_at FROM pedidos WHERE estado NOT IN ('LISTO', 'CANCELADO') ORDER BY id ASC LIMIT 50")
         
         # Reproducir sonido si hay pedidos nuevos
         if len(rows) > self.last_order_count:
             play_sound_new_order()
         self.last_order_count = len(rows)
         
-        for r in rows:
+        if not rows:
+            ttk.Label(self.cards_container, text="No hay pedidos activos en cocina.", font=(None, 16), bootstyle="inverse-dark").pack(pady=50)
+            return
+
+        # Grid de tarjetas (3 columnas)
+        cols = 3
+        first_btn = None
+        target_btn = None
+
+        for idx, r in enumerate(rows):
+            row, col = divmod(idx, cols)
+            pid, num, items_json, estado, mesa, fecha = r
+            
+            # Determinar color según estado (estilo web)
+            # RECIBIDO -> Azul (info)
+            # PREPARANDO -> Naranja (warning)
+            card_style = "info" if estado == 'RECIBIDO' else "warning"
+            btn_text = "EMPEZAR PREPARACIÓN" if estado == 'RECIBIDO' else "MARCAR COMO LISTO"
+            btn_style = "info" if estado == 'RECIBIDO' else "success"
+            
+            # Crear la tarjeta (Frame)
+            card = ttk.Frame(self.cards_container, bootstyle="secondary", padding=2)
+            card.grid(row=row, column=col, padx=10, pady=10, sticky='nsew')
+            
+            # Header de la tarjeta
+            header = ttk.Frame(card, bootstyle=card_style, padding=10)
+            header.pack(fill='x')
+            
+            ttk.Label(header, text=f"#{pid}", font=(None, 18, 'bold'), bootstyle=f"inverse-{card_style}").pack(side='left')
+            ttk.Label(header, text=f"MESA: {mesa if mesa else 'CAJA'}", font=(None, 12, 'bold'), bootstyle=f"inverse-{card_style}").pack(side='right')
+            
+            # Cuerpo de la tarjeta (Items)
+            body = ttk.Frame(card, bootstyle="light", padding=15)
+            body.pack(fill='both', expand=True)
+            
             try:
-                # Parsear el JSON de items para mostrar nombres legibles
-                items_obj = json.loads(r[2]) if r[2] else []
-                item_names = ', '.join([f"{it.get('qty', 1)}x {it.get('nombre')}" for it in items_obj])
+                items_list = json.loads(items_json) if items_json else []
+                for it in items_list:
+                    it_frame = ttk.Frame(body, bootstyle="light")
+                    it_frame.pack(fill='x', pady=2)
+                    ttk.Label(it_frame, text=f"• {it.get('nombre')}", font=(None, 13), bootstyle="inverse-light").pack(side='left')
+                    ttk.Label(it_frame, text=f"x{it.get('qty', 1)}", font=(None, 13, 'bold'), bootstyle="info").pack(side='right')
             except:
-                item_names = r[2] or ""
+                ttk.Label(body, text=items_json, font=(None, 11), wraplength=200).pack()
             
-            mesa_info = f"[{r[4]}]" if r[4] else "[CAJA]"
-            # Formato visual mejorado para mostrar el estado actual
-            estado = r[3]
-            self.listbox.insert('end', f" #{r[0]:<5} | {mesa_info:<10} | {estado:<15} | {item_names}")
+            # Footer con botón de acción (Focusable para TAB)
+            footer = ttk.Frame(card, bootstyle="light", padding=10)
+            footer.pack(fill='x')
             
-            # Colorear según estado
-            idx = self.listbox.size() - 1
-            if estado == 'PREPARANDO':
-                self.listbox.itemconfig(idx, fg='#f0ad4e') # Naranja/Amarillo
-            elif estado == 'RECIBIDO':
-                self.listbox.itemconfig(idx, fg='#5bc0de') # Azul
+            # El botón captura el foco TAB y ENTER (ya manejado globalmente por App._on_global_return)
+            btn = ttk.Button(footer, text=btn_text, bootstyle=btn_style, cursor="hand2", 
+                            command=lambda p=pid: self.advance_order_state_by_id(p))
+            btn.pack(fill='x', ipady=10)
+            btn._order_id = pid # Guardar ID para persistencia de foco
+            
+            # Forzar el foco si es el botón que buscamos
+            if pid == last_focused_id: target_btn = btn
+            if not first_btn: first_btn = btn
+            
+            # ELIMINADO: btn.bind('<Return>') para evitar doble ejecución con el manejador global
+            
+            # Efecto visual de foco para toda la tarjeta
+            def on_btn_focus(e, c=card):
+                c.configure(bootstyle="primary") 
+            
+            def on_btn_blur(e, c=card):
+                c.configure(bootstyle="secondary")
+            
+            btn.bind("<FocusIn>", on_btn_focus)
+            btn.bind("<FocusOut>", on_btn_blur)
 
-    def advance_order_state(self):
-        """Avanza el pedido por los estados: RECIBIDO -> PREPARANDO -> LISTO."""
+        # Configurar peso de columnas del grid
+        for i in range(cols):
+            self.cards_container.columnconfigure(i, weight=1)
+
+        # Restaurar foco de forma inteligente
+        if target_btn:
+            target_btn.focus_set()
+        elif first_btn:
+            # Si el pedido que tenía el foco ya no está (porque se completó), ir al primero
+            first_btn.focus_set()
+
+        # Configurar peso de columnas del grid
+        for i in range(cols):
+            self.cards_container.columnconfigure(i, weight=1)
+
+    def advance_order_state_by_id(self, pid):
+        """Avanza el estado de un pedido específico por su ID: RECIBIDO -> PREPARANDO -> LISTO."""
         try:
-            sel = self.listbox.curselection()
-            if not sel: 
-                # Si no hay selección pero hay elementos, seleccionar el primero
-                if self.listbox.size() > 0:
-                    self.listbox.selection_set(0)
-                    self.listbox.activate(0)
-                    sel = (0,)
+            # Obtener estado actual
+            with self.db.get_connection() as conn:
+                res = conn.execute("SELECT estado FROM pedidos WHERE id=?", (pid,)).fetchone()
+                if not res: return
+                current_state = res[0].upper()
+
+                if current_state == 'RECIBIDO':
+                    new_state = 'PREPARANDO'
+                    conn.execute('UPDATE pedidos SET estado=? WHERE id=?', (new_state, pid))
+                elif current_state == 'PREPARANDO':
+                    new_state = 'LISTO'
+                    conn.execute('UPDATE pedidos SET estado=? WHERE id=?', (new_state, pid))
+                    # El sonido se dispara aquí al finalizar
+                    play_sound_order_ready()
                 else:
-                    return
-                
-            index = sel[0]
-            text = self.listbox.get(index)
+                    return 
+                conn.commit()
             
-            import re
-            match = re.search(r'#(\d+)', text)
-            if not match: return
-            pid = int(match.group(1))
-
-            # Obtener estado actual directamente de la base de datos
-            res = self.db.fetch_one("SELECT estado FROM pedidos WHERE id=?", (pid,))
-            if not res: return
-            current_state = res[0]
-
-            if current_state == 'RECIBIDO':
-                new_state = 'PREPARANDO'
-                self.db.execute('UPDATE pedidos SET estado=? WHERE id=?', (new_state, pid))
-            elif current_state == 'PREPARANDO':
-                new_state = 'LISTO'
-                self.db.execute('UPDATE pedidos SET estado=? WHERE id=?', (new_state, pid))
-                play_sound_order_ready() # Sonido de campanas
-            else:
-                return 
-            
-            # Actualizar la lista inmediatamente
+            # Forzar refresco visual total para actualizar colores y botones
             self.refresh()
-            
-            # Mantener el foco y selección en la misma posición o la última disponible
-            if self.listbox.size() > 0:
-                new_idx = min(index, self.listbox.size() - 1)
-                self.listbox.selection_set(new_idx)
-                self.listbox.activate(new_idx)
-                self.listbox.focus_set()
-                
         except Exception as e:
-            logging.error(f"Error en KDS advance_order_state: {str(e)}")
+            logging.error(f"Error en KDS advance_order_state_by_id: {str(e)}")
             play_sound_error()
 
+    def advance_order_state(self):
+        """Mantenemos por compatibilidad, pero ahora usamos advance_order_state_by_id."""
+        pass
+
     def mark_ready(self):
-        """Mantenemos por compatibilidad con el manejador global de ENTER."""
-        self.advance_order_state()
+        """Mantenemos por compatibilidad."""
+        pass
 
 class WhatsAppFrame(tk.Canvas):
     """
@@ -1473,10 +1543,10 @@ class AdminFrame(tk.Canvas):
         
         self.btn_back_main = ttk.Button(self.header, text='Regresar', command=lambda: self.master.select(0), bootstyle="light-outline", cursor="hand2", padding=10)
         self.btn_back_main.pack(side='right', padx=5)
-        self.btn_back_main.bind('<Return>', lambda e: self.master.select(0))
+        # self.btn_back_main.bind('<Return>', lambda e: self.master.select(0)) # Redundante
         
         self.btn_back_admin = ttk.Button(self.header, text='Volver al Admin', command=self.show_admin_menu, bootstyle="light-outline", cursor="hand2", padding=10)
-        self.btn_back_admin.bind('<Return>', lambda e: self.show_admin_menu())
+        # self.btn_back_admin.bind('<Return>', lambda e: self.show_admin_menu()) # Redundante
 
         # --- Contenedor Principal con Notebook Oculto en el cuerpo ---
         self.notebook = ttk.Notebook(self.body, style='Hidden.TNotebook')
@@ -1506,6 +1576,9 @@ class AdminFrame(tk.Canvas):
         self.products_frame = ttk.Frame(self.notebook, padding=20)
         self.notebook.add(self.products_frame, text='Menú / Productos')
         self.setup_menu()
+
+        # Herramientas de mantenimiento al final del menú principal del admin
+        self.setup_admin_tools(self.menu_frame)
 
         self.show_admin_menu() # Mostrar el menú de cuadritos al inicio
 
@@ -1585,6 +1658,45 @@ class AdminFrame(tk.Canvas):
             card.bind("<Right>", lambda e, idx=i: nav_admin(idx, e))
 
         for i in range(4): cards_wrap.columnconfigure(i, weight=1)
+
+    def setup_admin_tools(self, parent):
+        """Herramientas especiales para el administrador."""
+        tools = ttk.LabelFrame(parent, text="Herramientas de Mantenimiento")
+        tools.pack(fill='x', pady=20)
+        
+        # Frame interno para el padding, ya que LabelFrame no soporta el parámetro padding en algunas versiones
+        inner_tools = ttk.Frame(tools, padding=15)
+        inner_tools.pack(fill='x')
+        
+        btn_frame = ttk.Frame(inner_tools)
+        btn_frame.pack(fill='x')
+        
+        ttk.Button(btn_frame, text="🧹 LIMPIAR PEDIDOS (REINICIAR COCINA)", 
+                  command=self.clear_all_orders, bootstyle="danger-outline").pack(side='left', padx=10)
+        
+        ttk.Button(btn_frame, text="📦 REINICIAR INVENTARIO", 
+                  command=self.reset_inventory, bootstyle="warning-outline").pack(side='left', padx=10)
+
+    def clear_all_orders(self):
+        """Elimina todos los pedidos de la base de datos para empezar de cero."""
+        if messagebox.askyesno("Confirmar Limpieza", "¿Está seguro de eliminar TODOS los pedidos? Esta acción no se puede deshacer."):
+            try:
+                with self.db.get_connection() as conn:
+                    conn.execute("DELETE FROM pedidos")
+                messagebox.showinfo("Éxito", "Todos los pedidos han sido eliminados. La cocina está limpia.")
+                # Si hay una instancia de KDS abierta, refrescarla si es posible
+            except Exception as e:
+                messagebox.showerror("Error", f"No se pudo limpiar los pedidos: {e}")
+
+    def reset_inventory(self):
+        """Reinicia los valores de inventario a cero."""
+        if messagebox.askyesno("Confirmar Reinicio", "¿Desea poner todas las existencias de inventario en cero?"):
+            try:
+                with self.db.get_connection() as conn:
+                    conn.execute("UPDATE inventario SET cantidad = 0")
+                messagebox.showinfo("Éxito", "Inventario reiniciado correctamente.")
+            except Exception as e:
+                messagebox.showerror("Error", f"No se pudo reiniciar el inventario: {e}")
 
     def open_section(self, index, title):
         """Abre una sección específica y actualiza la cabecera."""
@@ -1960,6 +2072,9 @@ class LoginWindow(ttk.Toplevel):
         self.username.focus_set()
         self.bind('<Return>', lambda e: self.try_login()) # Enter para loguear
         self.bind('<Escape>', lambda e: self.cancel())    # Escape para cerrar
+        
+        # Manejar el cierre por la "X" de la ventana
+        self.protocol("WM_DELETE_WINDOW", self.cancel)
 
     def try_login(self):
         """Verifica el usuario y contraseña contra la base de datos."""
@@ -2070,15 +2185,15 @@ class App(ttk.Window):
             pass
 
     def run_login_loop(self):
-        """Maneja el proceso de inicio de sesión hasta que sea exitoso o se cancele."""
+        """Maneja el proceso de inicio de sesión hasta que sea exitoso o se cierre la ventana."""
         while not self.user:
             login = LoginWindow(self, self.db)
             self.wait_window(login)
             if not self.user:
-                if not messagebox.askretrycancel("Login Requerido", "¿Desea intentar iniciar sesión nuevamente?"):
-                    self.destroy()
-                    sys.exit(0) # Salida forzada para evitar continuar con el __init__
-                    return
+                # Si el usuario es None, significa que cerró la ventana o canceló
+                self.destroy()
+                sys.exit(0) # Salida total inmediata
+                return
 
     def _check_session_periodically(self):
         """Verifica si la sesión sigue siendo válida."""
@@ -2094,32 +2209,19 @@ class App(ttk.Window):
         w = self.focus_get()
         if not w: return
         
-        # Si es un botón, ejecutarlo
+        # 1. Si es un botón, ejecutarlo
         if isinstance(w, (ttk.Button, tk.Button)):
             w.invoke()
             return
 
-        # Si estamos en el KDS y el foco está en la lista o el frame
-        tab_id = self.notebook.select()
-        if not tab_id: return
-        
-        # Obtener el nombre de la pestaña actual
-        tab_text = self.notebook.tab(self.notebook.select(), "text")
-        
-        # Caso especial para Cocina (KDS)
-        if "Cocina" in tab_text:
-            frame = self.nametowidget(tab_id)
-            if hasattr(frame, 'advance_order_state'):
-                frame.advance_order_state()
-                return
-
-        # Comportamiento por defecto para otros widgets
-        if isinstance(w, tk.Listbox):
-            w.event_generate('<Return>')
-        elif isinstance(w, (ttk.Radiobutton, tk.Radiobutton)):
+        # 2. Otros widgets interactivos
+        if isinstance(w, (ttk.Radiobutton, tk.Radiobutton)):
             w.invoke()
         elif hasattr(w, '_card_cmd'):
             w._card_cmd()
+        elif isinstance(w, tk.Listbox):
+            # Comportamiento por defecto para listbox si no se manejó antes
+            w.event_generate('<Return>')
 
     def build(self):
         """Crea el diseño general."""
@@ -2135,7 +2237,7 @@ class App(ttk.Window):
         # Botón para salir (más grande)
         self.btn_logout = ttk.Button(header, text='Cerrar Sesión', command=self.logout, bootstyle="danger", cursor="hand2", padding=12)
         self.btn_logout.pack(side='right', pady=10)
-        self.btn_logout.bind('<Return>', lambda e: self.logout())
+        # self.btn_logout.bind('<Return>', lambda e: self.logout()) # Redundante con global handler
 
         # --- Contenedor de Pestañas (Navegación Principal) ---
         style = ttk.Style()
