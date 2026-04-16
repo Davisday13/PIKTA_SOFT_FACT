@@ -14684,3 +14684,18 @@ AttributeError: 'AdminFrame' object has no attribute 'find_pos_printer'
 2026-04-14 20:24:34,907 - ERROR - Error al procesar pago: 'NoneType' object has no attribute 'upper'
 2026-04-14 20:28:17,164 - ERROR - Error al procesar pago: 'NoneType' object has no attribute 'upper'
 2026-04-14 20:41:27,661 - ERROR - Error al procesar pago: 'NoneType' object has no attribute 'upper'
+2026-04-15 21:42:17,991 - INFO - deps: Successfully imported "kivy_deps.angle" 0.4.0
+2026-04-15 21:42:17,992 - INFO - Logger: Record log in C:\Users\DAVIS\.kivy\logs\kivy_26-04-15_1.txt
+2026-04-15 21:42:17,992 - INFO - deps: Successfully imported "kivy_deps.glew" 0.3.1
+2026-04-15 21:42:17,993 - INFO - deps: Successfully imported "kivy_deps.sdl2" 0.8.0
+2026-04-15 21:42:17,993 - INFO - Kivy: v2.3.1
+2026-04-15 21:42:17,993 - INFO - Kivy: Installed at "C:\Users\DAVIS\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\kivy\__init__.py"
+2026-04-15 21:42:17,994 - INFO - Python: v3.13.13 (tags/v3.13.13:01104ce, Apr  7 2026, 19:25:48) [MSC v.1944 64 bit (AMD64)]
+2026-04-15 21:42:17,994 - INFO - Python: Interpreter at "C:\Users\DAVIS\AppData\Local\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\python.exe"
+2026-04-15 21:42:17,995 - INFO - Logger: Purge log fired. Processing...
+2026-04-15 21:42:17,996 - INFO - Logger: Purge finished!
+2026-04-15 21:42:19,512 - INFO - Factory: 195 symbols loaded
+2026-04-15 21:42:20,683 - INFO - Image: Providers: img_tex, img_dds, img_sdl2, img_pil (img_ffpyplayer ignored)
+2026-04-15 21:42:21,429 - INFO - Text: Provider: sdl2
+2026-04-15 21:42:23,600 - WARNING - stderr: C:\Users\DAVIS\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\requests\__init__.py:113: RequestsDependencyWarning: urllib3 (2.6.3) or chardet (7.4.2)/charset_normalizer (3.4.4) doesn't match a supported version!
+2026-04-15 21:42:23,601 - WARNING - stderr:   warnings.warn(

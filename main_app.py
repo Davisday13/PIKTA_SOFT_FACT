@@ -34,8 +34,10 @@ import sys
 import tempfile
 import hashlib
 import secrets
+import time
 import winsound
 import shutil
+import re
 
 # =============================================================================
 # FUNCIONES DE SONIDO Y NOTIFICACIÓN
@@ -176,6 +178,7 @@ ERR = '#d9534f'         # Color para errores críticos (rojo)
 FONT_SIZE_L = 16        # Tamaño de fuente grande
 FONT_SIZE_XL = 22       # Tamaño de fuente extra grande
 FONT_SIZE_NORMAL = 12   # Tamaño de fuente normal
+PREP_DURATION = timedelta(minutes=15)
 
 # Intentar importar Pillow para soporte avanzado de imágenes (JPEG, redimensionamiento)
 try:
@@ -201,6 +204,23 @@ def load_image(path, size=None):
         else:
             return tk.PhotoImage(file=path)
     except Exception:
+        return None
+
+
+def _parse_money(text):
+    """Extrae un número decimal de una cadena que contiene un importe.
+    Devuelve float o None si no se puede parsear.
+    """
+    if not text:
+        return None
+    # Buscar la primera ocurrencia de un número con decimales opcionales
+    m = re.search(r"-?\d+[\.,]?\d*", str(text))
+    if not m:
+        return None
+    num = m.group(0).replace(',', '.')
+    try:
+        return float(num)
+    except:
         return None
 
 
@@ -298,10 +318,14 @@ class DatabaseManager:
             # Migraciones: Asegurar columnas nuevas
             self._ensure_column('productos_menu', 'categoria', 'TEXT')
             self._ensure_column('productos_menu', 'emoji', 'TEXT')
+            self._ensure_column('productos_menu', 'prep_duration', 'INTEGER')
             self._ensure_column('pedidos', 'canal', 'TEXT')
             self._ensure_column('pedidos', 'usuario_id', 'INTEGER')
             self._ensure_column('pedidos', 'sesion_id', 'INTEGER')
             self._ensure_column('pedidos', 'created_at', 'TEXT')
+            # Columna para marcar el inicio de preparación (KDS)
+            self._ensure_column('pedidos', 'preparacion_inicio', 'TEXT')
+            self._ensure_column('pedidos', 'preparacion_duracion', 'INTEGER')
 
             # Migración de contraseñas a formato hash si es necesario
             cur.execute("SELECT id, username, password FROM usuarios")
@@ -345,7 +369,7 @@ class DatabaseManager:
                 try:
                     cur.execute('SELECT id FROM productos_menu WHERE nombre = ?', (n,))
                     if not cur.fetchone():
-                        cur.execute('INSERT INTO productos_menu (nombre, precio, categoria, emoji) VALUES (?,?,?,?)', (n, p, c, e))
+                        cur.execute('INSERT INTO productos_menu (nombre, precio, categoria, emoji, prep_duration) VALUES (?,?,?,?,?)', (n, p, c, e, 5))
                 except Exception as e:
                     logging.error(f"Error al insertar producto de prueba: {e}")
 
@@ -473,6 +497,7 @@ class POSFrame(tk.Canvas):
         self.user = user
         self.session_id = None
         self.cart = [] 
+        self.editing_table_id = None # Para rastrear si estamos editando una mesa existente
         
         # Logo de Fondo en POS
         bg_logo_path = os.path.join('Imagenes', 'pikta2.png')
@@ -586,59 +611,103 @@ class POSFrame(tk.Canvas):
         
         self.build_cobros_tab()
 
-        # Cargar productos inicialmente
-        self.render_products()
+        # Cargar productos inicialmente (SOLO SI ES VISIBLE)
+        # Se movió a open_pos para carga diferida.
+        pass
 
     def build_cobros_tab(self):
         """Construye la interfaz para cobrar pedidos de meseros con teclado numérico y métodos de pago."""
-        # Lado izquierdo: Lista de pedidos pendientes
-        left_c = ttk.Frame(self.tab_cobros)
-        left_c.pack(side='left', fill='both', expand=True, padx=(0, 10))
+        # Lado izquierdo: Lista de pedidos pendientes (Más angosto)
+        left_c = ttk.Frame(self.tab_cobros, width=450)
+        left_c.pack(side='left', fill='both', expand=False, padx=(0, 15))
+        left_c.pack_propagate(False)
         
-        ttk.Label(left_c, text='PEDIDOS PENDIENTES DE COBRO', font=(None, 14, 'bold')).pack(pady=10)
+        ttk.Label(left_c, text='PEDIDOS PENDIENTES', font=(None, 14, 'bold')).pack(pady=10)
         
-        # Tabla de pedidos pendientes
-        cols = ('ID', 'Número', 'Mesa', 'Total', 'Fecha')
-        self.unpaid_tree = ttk.Treeview(left_c, columns=cols, show='headings', bootstyle="info")
-        for col in cols:
-            self.unpaid_tree.heading(col, text=col)
-            self.unpaid_tree.column(col, width=100)
+        # Tabla de pedidos pendientes (Ajustada al ancho)
+        cols = ('ID', 'Número', 'Mesa', 'Total') # Quitamos fecha de aquí para ahorrar espacio
+        self.unpaid_tree = ttk.Treeview(left_c, columns=cols, show='headings', bootstyle="info", height=15)
+        
+        self.unpaid_tree.heading('ID', text='ID')
+        self.unpaid_tree.column('ID', width=40, anchor='center')
+        
+        self.unpaid_tree.heading('Número', text='Número')
+        self.unpaid_tree.column('Número', width=120, anchor='w')
+        
+        self.unpaid_tree.heading('Mesa', text='Mesa')
+        self.unpaid_tree.column('Mesa', width=120, anchor='center')
+        
+        self.unpaid_tree.heading('Total', text='Total')
+        self.unpaid_tree.column('Total', width=80, anchor='center')
         
         self.unpaid_tree.pack(fill='both', expand=True)
         
         ttk.Button(left_c, text='Actualizar Lista', command=self.refresh_unpaid_orders, bootstyle="info-outline").pack(pady=10)
         
-        # Lado derecho: Detalles y Cobro (Más ancho para el teclado y detalle)
-        right_c = ttk.Frame(self.tab_cobros, width=650, bootstyle="secondary")
-        right_c.pack(side='right', fill='y')
-        right_c.pack_propagate(False)
+        # Lado derecho: Detalles y Cobro (Ahora ocupa el resto y se expande)
+        right_c = ttk.Frame(self.tab_cobros, bootstyle="secondary")
+        right_c.pack(side='right', fill='both', expand=True)
         
-        ttk.Label(right_c, text='DETALLE DE CUENTA', font=(None, 14, 'bold'), bootstyle="inverse-secondary", padding=10).pack(fill='x')
-        # Detalle más grande y ancho
-        self.detail_text = tk.Text(right_c, bg=PANEL, fg=FG, font=(None, 14), height=8)
-        self.detail_text.pack(fill='x', padx=10, pady=5)
-        self.detail_text.config(state='disabled')
+        ttk.Label(right_c, text='DETALLE DE CUENTA', font=(None, 16, 'bold'), bootstyle="inverse-secondary", padding=5).pack(fill='x')
+        # Detalle tipo Excel (Treeview) - Reducido a 7 filas para dar espacio al teclado
+        cols_det = ('Producto', 'Cant', 'Precio', 'Subtotal')
+        self.cart_tree = ttk.Treeview(right_c, columns=cols_det, show='headings', height=7)
+        for col in cols_det:
+            self.cart_tree.heading(col, text=col)
+            self.cart_tree.column(col, anchor='center', width=80)
         
-        self.total_cobro_label = ttk.Label(right_c, text='Total a Cobrar: $0.00', font=(None, 24, 'bold'), bootstyle="inverse-secondary", padding=10)
+        self.cart_tree.column('Producto', width=220, anchor='w')
+        self.cart_tree.column('Cant', width=70, anchor='center')
+        self.cart_tree.pack(fill='x', expand=False)
+
+        # Evento para editar cantidad (Doble clic)
+        self.cart_tree.bind("<Double-1>", self.on_cart_double_click)
+
+        cart_scroll = ttk.Scrollbar(right_c, orient='vertical', command=self.cart_tree.yview)
+        self.cart_tree.configure(yscrollcommand=cart_scroll.set)
+        
+        self.total_cobro_label = ttk.Label(right_c, text='Total a Cobrar: $0.00', font=(None, 22, 'bold'), bootstyle="inverse-secondary", padding=5)
         self.total_cobro_label.pack(fill='x')
 
         # Botón para Agregar más productos a la mesa seleccionada
         ttk.Button(right_c, text='✚ AGREGAR PRODUCTOS A ESTA MESA', 
-                  command=self.add_more_to_table, bootstyle="warning", cursor="hand2", padding=10).pack(fill='x', padx=10, pady=5)
+                  command=self.add_more_to_table, bootstyle="warning", cursor="hand2", padding=8).pack(fill='x', padx=10, pady=2)
 
         # --- Teclado Numérico y Métodos de Pago ---
-        pay_frame = ttk.Frame(right_c, bootstyle="secondary", padding=10)
-        pay_frame.pack(fill='both', expand=True)
+        # Definir estilos para botones
+        style = ttk.Style()
+        style.configure("Large.TButton", font=(None, 16, 'bold'))
+        style.configure("success.TButton", font=(None, 12, 'bold'))
+        style.configure("info.TButton", font=(None, 12, 'bold'))
+        style.configure("primary.TButton", font=(None, 12, 'bold'))
 
-        # Entrada de "Paga con"
-        ttk.Label(pay_frame, text="Paga con $:", font=(None, 12), bootstyle="inverse-secondary").grid(row=0, column=0, columnspan=2, sticky='w')
+        pay_frame = ttk.Frame(right_c, bootstyle="secondary", padding=5)
+        pay_frame.pack(fill='both', expand=True)
+        
+        # Configurar expansión de pay_frame
+        pay_frame.columnconfigure(0, weight=1)
+        pay_frame.columnconfigure(1, weight=1)
+        pay_frame.columnconfigure(2, weight=1)
+        pay_frame.rowconfigure(2, weight=1) 
+
+        # Entrada de "Monto Recibido" y "Cambio" en la misma fila para ahorrar espacio y mejorar visibilidad
+        ttk.Label(pay_frame, text="Monto Recibido $:", font=(None, 11, 'bold'), bootstyle="inverse-secondary").grid(row=0, column=0, sticky='w')
+        ttk.Label(pay_frame, text="Cambio $:", font=(None, 11, 'bold'), bootstyle="inverse-secondary").grid(row=0, column=2, sticky='w', padx=(10, 0))
+
         self.pay_amount_var = tk.StringVar(value="0.00")
-        self.pay_entry = ttk.Entry(pay_frame, textvariable=self.pay_amount_var, font=(None, 18, 'bold'), justify='right')
-        self.pay_entry.grid(row=1, column=0, columnspan=3, sticky='ew', pady=5)
+        self.pay_entry = ttk.Entry(pay_frame, textvariable=self.pay_amount_var, font=(None, 22, 'bold'), justify='right')
+        self.pay_entry.grid(row=1, column=0, columnspan=2, sticky='ew', pady=(0, 5))
+
+        # El label de Cambio ahora está al lado del monto de entrada
+        self.change_label = ttk.Label(pay_frame, text='$0.00', font=(None, 22, 'bold'), bootstyle="inverse-secondary", anchor='e')
+        self.change_label.grid(row=1, column=2, sticky='ew', padx=(10, 0), pady=(0, 5))
 
         # Teclado Numérico
         numpad = ttk.Frame(pay_frame, bootstyle="secondary")
-        numpad.grid(row=2, column=0, rowspan=4, columnspan=2, pady=10)
+        numpad.grid(row=2, column=0, columnspan=2, sticky='nsew')
+        
+        for col in range(3): numpad.columnconfigure(col, weight=1)
+        for row in range(4): numpad.rowconfigure(row, weight=1)
 
         buttons = [
             '7', '8', '9',
@@ -658,84 +727,179 @@ class POSFrame(tk.Canvas):
                 else: self.pay_amount_var.set(curr + key)
 
         for i, b in enumerate(buttons):
-            btn = ttk.Button(numpad, text=b, width=5, bootstyle="light", 
-                            command=lambda x=b: press_key(x))
+            btn = ttk.Button(numpad, text=b, bootstyle="light", 
+                            command=lambda x=b: press_key(x), style="Large.TButton")
             btn.grid(row=i//3, column=i%3, padx=2, pady=2, sticky='nsew')
 
         # Métodos de Pago con Imágenes
         methods_frame = ttk.Frame(pay_frame, bootstyle="secondary")
-        methods_frame.grid(row=2, column=2, rowspan=4, padx=(10, 0), sticky='n')
+        methods_frame.grid(row=2, column=2, padx=(10, 0), sticky='nsew')
 
         self.payment_method = tk.StringVar(value="EFECTIVO")
         
         methods = [
-            ('EFECTIVO', 'efectivo.jpeg'),
-            ('YAPPY', 'yappy.png'),
-            ('TARJETA', 'visa.png')
+            ('EFECTIVO', 'efectivo.jpeg', 'success'),
+            ('YAPPY', 'yappy.png', 'info'),
+            ('TARJETA', 'visa.png', 'primary')
         ]
 
-        for i, (name, img_file) in enumerate(methods):
-            m_btn = ttk.Frame(methods_frame, bootstyle="secondary", cursor="hand2")
-            m_btn.pack(fill='x', pady=2)
+        ttk.Label(methods_frame, text="MÉTODOS", font=(None, 10, 'bold'), bootstyle="inverse-secondary").pack(pady=(0, 2))
+
+        for i, (name, img_file, style_name) in enumerate(methods):
+            m_btn_container = ttk.Frame(methods_frame, bootstyle="secondary")
+            m_btn_container.pack(fill='both', expand=True, pady=1)
             
             img = load_image(os.path.join('Imagenes', img_file), size=(40, 40))
-            if img:
-                lbl_img = ttk.Label(m_btn, image=img, bootstyle="inverse-secondary")
-                lbl_img.image = img
-                lbl_img.pack(side='left', padx=5)
             
-            # Usar Radiobutton estilizado como botón
-            rb = ttk.Radiobutton(m_btn, text=name, variable=self.payment_method, value=name, bootstyle="toolbutton")
-            rb.pack(side='left', fill='x', expand=True)
+            btn_pay = ttk.Button(m_btn_container, text=f"{name}", 
+                                image=img, compound='left',
+                                command=lambda n=name: self.pay_with_method(n), 
+                                bootstyle=f"{style_name}", cursor="hand2", padding=5)
+            btn_pay.image = img
+            btn_pay.pack(fill='both', expand=True)
 
-        # Cambio
-        self.change_label = ttk.Label(right_c, text='Cambio: $0.00', font=(None, 16), bootstyle="inverse-secondary", padding=5)
-        self.change_label.pack(fill='x')
-        
         def update_change(*args):
             try:
-                total = float(self.total_cobro_label.cget("text").split('$')[1])
-                paid = float(self.pay_amount_var.get())
+                # Extraer solo el valor numérico del label (ej: "Total a Cobrar: $11.50")
+                total_text = self.total_cobro_label.cget("text")
+                total = _parse_money(total_text) or 0.0
+                
+                # Obtener el monto pagado
+                paid_val = self.pay_amount_var.get()
+                paid = _parse_money(paid_val) or 0.0
+                
                 change = paid - total
-                self.change_label.config(text=f"Cambio: ${max(0, change):.2f}")
-            except: pass
+                self.change_label.config(text=f"${max(0, change):.2f}")
+            except Exception:
+                self.change_label.config(text="$0.00")
         
         self.pay_amount_var.trace_add("write", update_change)
 
-        ttk.Button(right_c, text='PROCESAR PAGO', command=self.pay_order, bootstyle="success", cursor="hand2", padding=15).pack(fill='x', padx=10, pady=10)
-        
         self.unpaid_tree.bind('<<TreeviewSelect>>', self.on_unpaid_select)
         self.refresh_unpaid_orders()
 
+    def pay_with_method(self, method):
+        """Asigna el método de pago y procesa la transacción inmediatamente."""
+        self.payment_method.set(method)
+        self.pay_order()
+
     def refresh_unpaid_orders(self):
-        """Consulta pedidos de meseros que aún no han sido pagados."""
+        """Consulta pedidos de meseros y de caja (para llevar) que aún no han sido pagados."""
         for r in self.unpaid_tree.get_children(): self.unpaid_tree.delete(r)
         
-        query = "SELECT id, numero, mesa, total, created_at FROM pedidos WHERE pagado = 0 AND canal = 'MESERO' ORDER BY created_at DESC"
+        # Incluimos 'LLEVAR' en la consulta para que el cajero pueda cobrarlos
+        query = "SELECT id, numero, mesa, total, created_at FROM pedidos WHERE pagado = 0 AND canal IN ('MESERO', 'LLEVAR') ORDER BY created_at DESC"
         rows = self.db.fetch_all(query)
         for r in rows:
-            self.unpaid_tree.insert('', 'end', values=r)
+            # Si mesa es None (pedidos para llevar), mostrar 'PARA LLEVAR'
+            # r = (id, numero, mesa, total, created_at)
+            id_val, num, mesa, total, fecha = r
+            if mesa is None: mesa = 'PARA LLEVAR'
+            
+            # Insertar solo los 4 campos que definimos en build_cobros_tab
+            self.unpaid_tree.insert('', 'end', values=(id_val, num, mesa, total))
 
     def on_unpaid_select(self, event):
-        """Muestra el detalle del pedido seleccionado."""
+        """Muestra el detalle del pedido seleccionado en la tabla tipo Excel."""
         sel = self.unpaid_tree.selection()
         if not sel: return
         item = self.unpaid_tree.item(sel[0])
         order_id = item['values'][0]
         
+        # Guardar el ID del pedido actual para referencia
+        self.current_order_id = order_id
+        
         order = self.db.fetch_one("SELECT items, total FROM pedidos WHERE id = ?", (order_id,))
         if order:
             items = json.loads(order[0])
-            self.detail_text.config(state='normal')
-            self.detail_text.delete('1.0', 'end')
-            # Detalle con fuente más legible
-            self.detail_text.insert('end', f"{'PRODUCTO':<20} {'PRECIO':>10}\n")
-            self.detail_text.insert('end', "-"*35 + "\n")
+            # Limpiar tabla de detalles
+            for r in self.cart_tree.get_children(): self.cart_tree.delete(r)
+            
+            # Poblar tabla con items
             for it in items:
-                self.detail_text.insert('end', f"{it['nombre']:<20} ${it['precio']:>10.2f}\n")
-            self.detail_text.config(state='disabled')
+                nombre = it.get('nombre', 'N/A')
+                precio = it.get('precio', 0.0)
+                qty = it.get('qty', 1)
+                subtotal = precio * qty
+                self.cart_tree.insert('', 'end', values=(nombre, f"x{qty}", f"${precio:.2f}", f"${subtotal:.2f}"))
+            
             self.total_cobro_label.config(text=f"Total a Cobrar: ${order[1]:.2f}")
             self.pay_amount_var.set(f"{order[1]:.2f}")
+
+    def on_cart_double_click(self, event):
+        """Permite editar la cantidad de un producto directamente en la celda."""
+        region = self.cart_tree.identify_region(event.x, event.y)
+        if region != "cell": return
+        
+        column = self.cart_tree.identify_column(event.x)
+        if column != "#2": return # Solo permitir editar la columna 'Cant'
+        
+        item_id = self.cart_tree.identify_row(event.y)
+        if not item_id: return
+        
+        # Obtener coordenadas de la celda para posicionar el Entry
+        x, y, width, height = self.cart_tree.bbox(item_id, column)
+        
+        # Obtener valor actual
+        curr_values = self.cart_tree.item(item_id, 'values')
+        curr_qty = curr_values[1].replace('x', '')
+        
+        # Crear Entry flotante sobre la celda
+        entry = ttk.Entry(self.cart_tree, justify='center')
+        entry.insert(0, curr_qty)
+        entry.select_range(0, 'end')
+        entry.focus_set()
+        
+        # Posicionar el entry exactamente sobre la celda
+        entry.place(x=x, y=y, width=width, height=height)
+        
+        def save_edit(event=None):
+            try:
+                new_qty = int(entry.get())
+                if new_qty < 1: raise ValueError
+                
+                # Recalcular subtotal
+                precio = float(curr_values[2].replace('$', ''))
+                subtotal = precio * new_qty
+                
+                # Actualizar fila
+                self.cart_tree.item(item_id, values=(curr_values[0], f"x{new_qty}", f"${precio:.2f}", f"${subtotal:.2f}"))
+                
+                # Recalcular total general y guardar en BD
+                self.update_order_total_from_tree()
+            except ValueError:
+                pass # Si no es un número válido, ignorar
+            finally:
+                entry.destroy()
+
+        # Atajos para el entry
+        entry.bind('<Return>', save_edit)
+        entry.bind('<FocusOut>', save_edit)
+        entry.bind('<Escape>', lambda e: entry.destroy())
+
+    def update_order_total_from_tree(self):
+        """Recalcula el total y guarda los cambios en la base de datos."""
+        total = 0.0
+        updated_items = []
+        for item_id in self.cart_tree.get_children():
+            vals = self.cart_tree.item(item_id, 'values')
+            nombre = vals[0]
+            qty = int(vals[1].replace('x', ''))
+            precio = float(vals[2].replace('$', ''))
+            subtotal = precio * qty
+            total += subtotal
+            updated_items.append({'nombre': nombre, 'qty': qty, 'precio': precio})
+        
+        # Actualizar en la base de datos para no perder cambios al cambiar de selección
+        if hasattr(self, 'current_order_id'):
+            self.db.execute("UPDATE pedidos SET items=?, total=? WHERE id=?", 
+                            (json.dumps(updated_items, ensure_ascii=False), total, self.current_order_id))
+        
+        self.total_cobro_label.config(text=f"Total a Cobrar: ${total:.2f}")
+        self.pay_amount_var.set(f"{total:.2f}")
+        
+        # Refrescar la lista de pedidos para mostrar el nuevo total
+        self.refresh_unpaid_orders()
 
     def pay_order(self):
         """Registra el pago del pedido seleccionado."""
@@ -745,30 +909,152 @@ class POSFrame(tk.Canvas):
             return
         
         if not self.session_id:
-            messagebox.showwarning('Caja', 'Debe abrir la caja antes de procesar pagos')
-            return
+            if messagebox.askyesno('Caja cerrada', 'No hay caja abierta. ¿Desea abrirla ahora?'):
+                self.open_caja()
+            if not self.session_id:
+                return
 
         item = self.unpaid_tree.item(sel[0])
         order_id = item['values'][0]
         method = self.payment_method.get()
         
-        if messagebox.askyesno('Confirmar Pago', f'¿Confirmar el pago de ${self.total_cobro_label.cget("text").split("$")[1]} con {method}?'):
+        total_amt = _parse_money(self.total_cobro_label.cget("text"))
+        paid_amt = _parse_money(self.pay_amount_var.get()) or 0.0
+        
+        if total_amt is None or total_amt <= 0:
+            messagebox.showerror('Error', 'Importe inválido, verifique el pedido')
+            return
+
+        if paid_amt < total_amt and method == 'EFECTIVO':
+            messagebox.showwarning('Pago Insuficiente', f'El monto pagado (${paid_amt:.2f}) es menor al total (${total_amt:.2f})')
+            return
+
+        change = max(0, paid_amt - total_amt)
+        confirm_msg = f'¿Confirmar el pago de ${total_amt:.2f} con {method}?'
+        if method == 'EFECTIVO':
+            confirm_msg += f'\n\nCambio a devolver: ${change:.2f}'
+
+        if messagebox.askyesno('Confirmar Pago', confirm_msg):
             try:
-                self.db.execute('UPDATE pedidos SET pagado = 1, sesion_id = ?, metodo_pago = ? WHERE id = ?', 
-                                (self.session_id, method, order_id))
-                messagebox.showinfo('Éxito', 'Pago procesado correctamente')
+                # 1. Obtener items finales de la tabla (por si se editaron cantidades)
+                final_items = []
+                for item_id in self.cart_tree.get_children():
+                    vals = self.cart_tree.item(item_id, 'values')
+                    nombre = vals[0]
+                    qty = int(vals[1].replace('x', ''))
+                    precio = float(vals[2].replace('$', ''))
+                    final_items.append({'nombre': nombre, 'qty': qty, 'precio': precio})
+                
+                # 2. Actualizar el pedido en la BD (marcar pagado y guardar items/total finales)
+                self.db.execute('UPDATE pedidos SET pagado = 1, sesion_id = ?, metodo_pago = ?, items = ?, total = ? WHERE id = ?', 
+                                (self.session_id, method, json.dumps(final_items, ensure_ascii=False), total_amt, int(order_id)))
+                
+                # 3. Generar factura para mostrar e imprimir
+                factura_text = self.generate_invoice_text(order_id, method, final_items, total_amt, paid_amt, change)
+                
+                messagebox.showinfo('Éxito', f'Pago procesado correctamente.\nCambio: ${change:.2f}')
+                
+                # 4. Mostrar factura y opción de imprimir
+                self.show_invoice_popup(factura_text)
+                
+                # 5. Limpiar y actualizar
+                self.current_order_id = None
                 self.refresh_unpaid_orders()
-                self.detail_text.config(state='normal')
-                self.detail_text.delete('1.0', 'end')
-                self.detail_text.config(state='disabled')
+                for r in self.cart_tree.get_children(): self.cart_tree.delete(r)
                 self.total_cobro_label.config(text="Total a Cobrar: $0.00")
                 self.pay_amount_var.set("0.00")
+                self.change_label.config(text="Cambio: $0.00")
             except Exception as e:
-                logging.error(f"Error al procesar pago: {e}")
+                logging.exception('Error al procesar pago')
                 messagebox.showerror('Error', 'No se pudo procesar el pago')
 
+    def generate_invoice_text(self, order_id, method, items, total, paid, change):
+        """Genera el texto formateado de la factura."""
+        res = self.db.fetch_one("SELECT numero, mesa, created_at FROM pedidos WHERE id=?", (order_id,))
+        num, mesa, fecha = res if res else ("N/A", "N/A", datetime.now().strftime("%Y-%m-%d %H:%M"))
+        
+        # Formatear fecha si es objeto datetime o string ISO
+        if isinstance(fecha, str) and 'T' in fecha:
+            try:
+                dt = datetime.fromisoformat(fecha)
+                fecha = dt.strftime("%d/%m/%Y %H:%M")
+            except: pass
+
+        factura =  "      *** PIK'TA GRILL ***\n"
+        factura += "  DONDE SI SABEMOS DE HAMBURGUESAS\n"
+        factura += "  ------------------------------------\n"
+        factura += f"  FACTURA: {num}\n"
+        factura += f"  FECHA:   {fecha}\n"
+        factura += f"  MESA:    {mesa if mesa else 'PARA LLEVAR'}\n"
+        factura += f"  CAJERO:  {self.user.get('nombre', 'Cajero')}\n"
+        factura += "  ------------------------------------\n"
+        factura += f"  {'CANT':<5} {'DESCRIPCIÓN':<20} {'SUB':>7}\n"
+        factura += "  ------------------------------------\n"
+        
+        for it in items:
+            nombre = it['nombre'][:20]
+            qty = it['qty']
+            sub = it['precio'] * qty
+            factura += f"  {qty:<5} {nombre:<20} ${sub:>7.2f}\n"
+            
+        factura += "  ------------------------------------\n"
+        factura += f"  TOTAL:                $ {total:>10.2f}\n"
+        factura += f"  RECIBIDO:             $ {paid:>10.2f}\n"
+        factura += f"  CAMBIO:               $ {change:>10.2f}\n"
+        factura += "  ------------------------------------\n"
+        factura += f"  MÉTODO: {method}\n"
+        factura += "  ------------------------------------\n"
+        factura += "      GRACIAS POR SU PREFERENCIA\n"
+        factura += "         VUELVA PRONTO!\n"
+        return factura
+
+    def show_invoice_popup(self, text):
+        """Muestra una ventana emergente con la factura y opción de imprimir."""
+        win = tk.Toplevel(self)
+        win.title("Factura de Venta")
+        win.geometry("400x600")
+        
+        # Frame para logo
+        logo_frame = ttk.Frame(win)
+        logo_frame.pack(pady=10)
+        
+        logo = load_image(os.path.join('Imagenes', 'pikta2.png'), size=(100, 100))
+        if logo:
+            lbl_logo = ttk.Label(logo_frame, image=logo)
+            lbl_logo.image = logo
+            lbl_logo.pack()
+
+        txt = tk.Text(win, font=("Courier", 10), padx=20, pady=10)
+        txt.insert('end', text)
+        txt.config(state='disabled')
+        txt.pack(fill='both', expand=True)
+        
+        btn_frame = ttk.Frame(win, padding=10)
+        btn_frame.pack(fill='x')
+        
+        def print_ticket():
+            # Guardar en temporal e imprimir
+            try:
+                fd, path = tempfile.mkstemp(suffix=".txt")
+                with os.fdopen(fd, 'w') as f:
+                    f.write(text)
+                
+                # Intentar imprimir (comando específico de windows)
+                if sys.platform == "win32":
+                    os.startfile(path, "print")
+                else:
+                    messagebox.showinfo("Info", "Impresión solo disponible en Windows")
+                
+                win.destroy()
+            except Exception as e:
+                messagebox.showerror("Error", f"No se pudo imprimir: {e}")
+
+        ttk.Button(btn_frame, text="IMPRIMIR TICKET", command=print_ticket, bootstyle="success").pack(side='left', fill='x', expand=True, padx=5)
+        ttk.Button(btn_frame, text="CERRAR", command=win.destroy, bootstyle="danger").pack(side='right', fill='x', expand=True, padx=5)
+
+
     def add_more_to_table(self):
-        """Permite al cajero agregar más productos a un pedido de mesa ya existente."""
+        """Prepara el sistema para agregar más productos a un pedido de mesa ya existente."""
         sel = self.unpaid_tree.selection()
         if not sel:
             messagebox.showwarning('Aviso', 'Seleccione una mesa primero')
@@ -783,38 +1069,45 @@ class POSFrame(tk.Canvas):
         
         # Guardar en memoria que estamos editando una mesa
         self.editing_table_id = order_id
-        messagebox.showinfo("Modo Edición", f"Agregue los productos adicionales para la {mesa} y presione 'Confirmar Pedido'.")
+        messagebox.showinfo("Modo Edición", f"ESTÁ EDITANDO LA {mesa}.\n\nAgregue los productos extras y presione 'CONFIRMAR PEDIDO' para guardarlos en la cuenta de la mesa.")
+
+    def update_existing_order(self):
+        """Actualiza un pedido existente con los nuevos productos del carrito."""
+        if not self.cart: return
         
-        # Modificar temporalmente el comportamiento de process_order
-        self._original_process_order = self.process_order
-        def update_existing_order():
-            if not self.cart: return
-            
+        try:
             # Obtener items actuales
-            res = self.db.fetch_one("SELECT items FROM pedidos WHERE id=?", (self.editing_table_id,))
-            current_items = json.loads(res[0]) if res else []
+            res = self.db.fetch_one("SELECT items, mesa FROM pedidos WHERE id=?", (self.editing_table_id,))
+            if not res: return
+            
+            current_items = json.loads(res[0])
+            mesa = res[1]
             
             # Añadir nuevos
             new_items = [{'id': p[0], 'nombre': p[1], 'precio': p[2]} for p in self.cart]
             updated_items = current_items + new_items
             new_total = sum(p['precio'] for p in updated_items)
             
-            try:
-                self.db.execute("UPDATE pedidos SET items=?, subtotal=?, total=? WHERE id=?", 
-                                (json.dumps(updated_items, ensure_ascii=False), new_total, new_total, self.editing_table_id))
-                messagebox.showinfo("Éxito", f"Mesa {mesa} actualizada correctamente.")
-                self.cart.clear()
-                self.update_cart_display()
-                # Restaurar comportamiento y volver a pestaña de cobros
-                self.process_order = self._original_process_order
-                self.editing_table_id = None
-                self.pos_notebook.select(1)
-                self.refresh_unpaid_orders()
-            except Exception as e:
-                logging.error(f"Error al actualizar mesa: {e}")
-                messagebox.showerror("Error", "No se pudo actualizar la mesa.")
-
-        self.process_order = update_existing_order
+            self.db.execute("UPDATE pedidos SET items=?, subtotal=?, total=? WHERE id=?", 
+                            (json.dumps(updated_items, ensure_ascii=False), new_total, new_total, self.editing_table_id))
+            
+            # Registrar en auditoría
+            self.db.audit_log('pedidos', 'UPDATE', self.user.get('username'), f'Productos extras añadidos a {mesa}', new=new_items)
+            
+            messagebox.showinfo("Éxito", f"Productos añadidos correctamente a la {mesa}.")
+            
+            # Limpiar estado
+            self.cart.clear()
+            self.update_cart_display()
+            self.editing_table_id = None
+            
+            # Volver a pestaña de cobros
+            self.pos_notebook.select(1)
+            self.refresh_unpaid_orders()
+            
+        except Exception as e:
+            logging.error(f"Error al actualizar mesa: {e}")
+            messagebox.showerror("Error", "No se pudo actualizar la mesa.")
 
     def render_products(self):
         """Genera dinámicamente las tarjetas de productos según la categoría."""
@@ -823,7 +1116,7 @@ class POSFrame(tk.Canvas):
             w.destroy()
         
         # Obtener productos de la base de datos
-        products = self.db.fetch_all('SELECT id, nombre, precio, categoria, emoji FROM productos_menu')
+        products = self.db.fetch_all('SELECT id, nombre, precio, categoria, emoji, prep_duration FROM productos_menu')
         filtered = [p for p in products if (p[3] or '').strip() == self.selected_category.get()]
         
         if not filtered:
@@ -840,7 +1133,10 @@ class POSFrame(tk.Canvas):
             
             ttk.Label(card, text=p[4] or '🍽', font=(None, 40), bootstyle="inverse-light").pack(pady=5)
             ttk.Label(card, text=p[1], font=(None, 14, 'bold'), bootstyle="inverse-light", wraplength=140, justify='center').pack()
-            ttk.Label(card, text=f"${p[2]:.2f}", font=(None, 16), bootstyle="info").pack(pady=5)
+            price_lbl = f"${p[2]:.2f}"
+            if p[5]:
+                price_lbl += f" • {p[5]}m"
+            ttk.Label(card, text=price_lbl, font=(None, 16), bootstyle="info").pack(pady=5)
             
             # Botón para añadir al carrito (más grande)
             btn = ttk.Button(card, text='Añadir', command=lambda pid=p: self.add_product(pid), bootstyle="info", cursor="hand2", takefocus=True, padding=8)
@@ -889,9 +1185,14 @@ class POSFrame(tk.Canvas):
         self.total_label.config(text=f'Total: ${total:.2f}')
 
     def process_order(self):
-        """Guarda el pedido en la base de datos y lo envía a cocina."""
+        """Guarda el pedido en la base de datos o actualiza uno existente si estamos en modo edición."""
         if not self.cart:
             messagebox.showinfo('Aviso', 'El carrito está vacío')
+            return
+        
+        # Si estamos en modo edición de mesa, llamamos a la lógica de actualización
+        if self.editing_table_id:
+            self.update_existing_order()
             return
         
         # Preparar datos del pedido
@@ -907,10 +1208,27 @@ class POSFrame(tk.Canvas):
             created_at = datetime.now().isoformat()
             usuario_id = self.user.get('id') if self.user else None
             sesion_id = self.session_id
-            
-            # Insertar en la base de datos
-            self.db.execute('INSERT INTO pedidos (numero, items, subtotal, total, estado, canal, usuario_id, sesion_id, created_at) VALUES (?,?,?,?,?,?,?,?,?)',
-                            (numero, items, subtotal, total, 'RECIBIDO', canal, usuario_id, sesion_id, created_at))
+            # Si el pedido es por CAJA, considerarlo pagado inmediatamente
+            pagado = 1 if canal == 'CAJA' else 0
+            metodo_pago = 'EFECTIVO' if canal == 'CAJA' else None
+
+            # Si es CAJA pero no hay sesión abierta, solicitar abrir caja
+            if canal == 'CAJA' and not sesion_id:
+                if messagebox.askyesno('Abrir Caja', 'No hay caja abierta. ¿Desea abrirla ahora?'):
+                    self.open_caja()
+                    sesion_id = self.session_id
+
+            # Calcular duración de preparación del pedido (max de items)
+            default_min = int(PREP_DURATION.total_seconds() // 60)
+            try:
+                order_prep = max([(p[5] if (len(p) > 5 and p[5] is not None) else default_min) for p in self.cart])
+            except Exception:
+                order_prep = default_min
+
+            # Insertar en la base de datos, incluyendo estado de pago y duración de preparación
+            self.db.execute('''INSERT INTO pedidos (numero, items, subtotal, descuento, total, estado, canal, usuario_id, sesion_id, metodo_pago, pagado, preparacion_duracion, created_at)
+                               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                            (numero, items, subtotal, 0.0, total, 'RECIBIDO', canal, usuario_id, sesion_id, metodo_pago, pagado, order_prep, created_at))
             
             # Registrar en auditoría
             self.db.audit_log('pedidos', 'INSERT', self.user.get('username'), f'Pedido {canal} creado: {numero}', new=items_list)
@@ -988,6 +1306,43 @@ class POSFrame(tk.Canvas):
         t.config(state='disabled')
         t.pack(pady=10)
         ttk.Button(frm, text='Regresar al Menú', command=self.render_products, bootstyle="info").pack(pady=10)
+
+    def notify_order_ready(self, text='¡Pedido Listo!'):
+        """Muestra un indicador visual temporal en la cabecera para notificar pedidos listos."""
+        try:
+            # Evitar duplicados
+            if hasattr(self, '_notify_lbl') and getattr(self, '_notify_lbl') and str(getattr(self, '_notify_lbl')):
+                try:
+                    self._notify_lbl.config(text=text)
+                    return
+                except: pass
+
+            self._notify_lbl = ttk.Label(self.header, text=text, bootstyle='danger', padding=8)
+            self._notify_lbl.pack(side='right', padx=5)
+
+            # Parpadeo simple: alternar visibilidad un par de veces
+            def blink(count=0):
+                try:
+                    if not hasattr(self, '_notify_lbl'): return
+                    if count >= 6:
+                        try:
+                            self._notify_lbl.destroy()
+                            delattr(self, '_notify_lbl')
+                        except:
+                            pass
+                        return
+                    current = self._notify_lbl.winfo_viewable()
+                    if current:
+                        self._notify_lbl.pack_forget()
+                    else:
+                        self._notify_lbl.pack(side='right', padx=5)
+                    self.after(400, lambda: blink(count+1))
+                except Exception:
+                    pass
+
+            blink(0)
+        except Exception:
+            logging.exception('Error mostrando notificación visual en POS')
 
 
 class MeseroFrame(tk.Canvas):
@@ -1095,7 +1450,7 @@ class MeseroFrame(tk.Canvas):
 
     def render_products(self):
         for w in self.products_frame.winfo_children(): w.destroy()
-        products = self.db.fetch_all('SELECT id, nombre, precio, categoria, emoji FROM productos_menu')
+        products = self.db.fetch_all('SELECT id, nombre, precio, categoria, emoji, prep_duration FROM productos_menu')
         filtered = [p for p in products if (p[3] or '').strip() == self.selected_category.get()]
         
         cols = 3
@@ -1106,7 +1461,10 @@ class MeseroFrame(tk.Canvas):
             card.grid(row=r, column=c, padx=12, pady=12, sticky='nsew')
             ttk.Label(card, text=p[4] or '🍽', font=(None, 40), bootstyle="inverse-light").pack(pady=5)
             ttk.Label(card, text=p[1], font=(None, 14, 'bold'), bootstyle="inverse-light", wraplength=140, justify='center').pack()
-            ttk.Label(card, text=f"${p[2]:.2f}", font=(None, 16), bootstyle="warning").pack(pady=5)
+            price_lbl = f"${p[2]:.2f}"
+            if p[5]:
+                price_lbl += f" • {p[5]}m"
+            ttk.Label(card, text=price_lbl, font=(None, 16), bootstyle="warning").pack(pady=5)
             btn = ttk.Button(card, text='Añadir', command=lambda pid=p: self.add_product(pid), bootstyle="warning", cursor="hand2", padding=8, takefocus=True)
             btn.pack(fill='x')
             btn.bind('<Return>', lambda e, pid=p: self.add_product(pid))
@@ -1160,13 +1518,33 @@ class MeseroFrame(tk.Canvas):
             created_at = datetime.now().isoformat()
             usuario_id = self.user.get('id') if self.user else None
             
+            # Calcular duración de preparación del pedido (max de items)
+            default_min = int(PREP_DURATION.total_seconds() // 60)
+            try:
+                order_prep = max([(p[5] if (len(p) > 5 and p[5] is not None) else default_min) for p in self.cart])
+            except Exception:
+                order_prep = default_min
+
             # Los pedidos de mesero se guardan como NO PAGADOS para que caja los cobre luego
-            self.db.execute('INSERT INTO pedidos (numero, items, subtotal, total, estado, canal, usuario_id, created_at, mesa, pagado) VALUES (?,?,?,?,?,?,?,?,?,?)',
-                            (numero, items, total, total, 'RECIBIDO', 'MESERO', usuario_id, created_at, mesa, 0))
+            self.db.execute('INSERT INTO pedidos (numero, items, subtotal, total, estado, canal, usuario_id, created_at, mesa, pagado, preparacion_duracion) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+                            (numero, items, total, total, 'RECIBIDO', 'MESERO', usuario_id, created_at, mesa, 0, order_prep))
             
             messagebox.showinfo('Éxito', f'Pedido de {mesa} enviado a cocina')
             self.cart.clear()
             self.update_cart_display()
+
+            # Intentar notificar a la pestaña POS para que refresque la lista de cobros
+            try:
+                app = self.winfo_toplevel()
+                if hasattr(app, 'notebook'):
+                    for i in range(app.notebook.index('end')):
+                        if app.notebook.tab(i, 'text') == 'Caja / POS':
+                            pos_frame = app.nametowidget(app.notebook.tabs()[i])
+                            if hasattr(pos_frame, 'refresh_unpaid_orders'):
+                                pos_frame.refresh_unpaid_orders()
+                            break
+            except Exception:
+                logging.exception('Error notificando POS sobre nuevo pedido Mesero')
         except Exception as e:
             logging.error(f'Error al procesar pedido mesero: {e}')
             messagebox.showerror('Error', 'No se pudo enviar el pedido')
@@ -1231,6 +1609,11 @@ class KDSFrame(tk.Canvas):
         self.listbox = tk.Listbox(self.body, bg=PANEL, fg=FG, font=(None, 14), bd=0, highlightthickness=0, selectbackground=ACCENT, takefocus=True)
         self.listbox.pack(fill='both', expand=True, pady=10)
         self.listbox.bind('<Return>', lambda e: self.advance_order_state())
+        # Permitir que Tab avance el estado (evitar cambiar foco)
+        def on_tab(e):
+            self.advance_order_state()
+            return 'break'
+        self.listbox.bind('<Tab>', on_tab)
         
         footer = ttk.Frame(self.body)
         footer.pack(fill='x', pady=10)
@@ -1242,7 +1625,7 @@ class KDSFrame(tk.Canvas):
         """Consulta la base de datos y actualiza la lista de pedidos activos."""
         self.listbox.delete(0, 'end')
         # Traer pedidos que NO tengan estado 'LISTO'
-        rows = self.db.fetch_all("SELECT id, numero, items, estado, mesa FROM pedidos WHERE estado NOT IN ('LISTO', 'CANCELADO') ORDER BY id DESC LIMIT 50")
+        rows = self.db.fetch_all("SELECT id, numero, items, estado, mesa, preparacion_inicio, preparacion_duracion FROM pedidos WHERE estado NOT IN ('LISTO', 'CANCELADO') ORDER BY id DESC LIMIT 50")
         
         # Reproducir sonido si hay pedidos nuevos
         if len(rows) > self.last_order_count:
@@ -1258,9 +1641,27 @@ class KDSFrame(tk.Canvas):
                 item_names = r[2] or ""
             
             mesa_info = f"[{r[4]}]" if r[4] else "[CAJA]"
-            # Formato visual mejorado para mostrar el estado actual
             estado = r[3]
-            self.listbox.insert('end', f" #{r[0]:<5} | {mesa_info:<10} | {estado:<15} | {item_names}")
+            prep_start = r[5]
+            time_info = ""
+            if estado == 'PREPARANDO' and prep_start:
+                try:
+                    started = datetime.fromisoformat(prep_start)
+                    elapsed = datetime.now() - started
+                    # usar duración específica del pedido si está definida
+                    dur_min = r[6] if len(r) > 6 and r[6] is not None else int(PREP_DURATION.total_seconds()//60)
+                    remaining = timedelta(minutes=dur_min) - elapsed
+                    if remaining.total_seconds() <= 0:
+                        time_info = ' (casi listo)'
+                    else:
+                        mins = int(remaining.total_seconds() // 60)
+                        secs = int(remaining.total_seconds() % 60)
+                        time_info = f" ({mins}m{secs}s restantes)"
+                except Exception:
+                    time_info = ''
+
+            # Formato visual mejorado para mostrar el estado actual y tiempo
+            self.listbox.insert('end', f" #{r[0]:<5} | {mesa_info:<10} | {estado:<15}{time_info} | {item_names}")
             
             # Colorear según estado
             idx = self.listbox.size() - 1
@@ -1291,17 +1692,50 @@ class KDSFrame(tk.Canvas):
             pid = int(match.group(1))
 
             # Obtener estado actual directamente de la base de datos
-            res = self.db.fetch_one("SELECT estado FROM pedidos WHERE id=?", (pid,))
+            res = self.db.fetch_one("SELECT estado, preparacion_inicio, preparacion_duracion, numero FROM pedidos WHERE id=?", (pid,))
             if not res: return
             current_state = res[0]
+            prep_start = res[1]
+            prep_dur = res[2]
+            numero = res[3]
 
             if current_state == 'RECIBIDO':
                 new_state = 'PREPARANDO'
-                self.db.execute('UPDATE pedidos SET estado=? WHERE id=?', (new_state, pid))
+                started_at = datetime.now().isoformat()
+                # Asegurar duración de preparación en el pedido
+                default_min = int(PREP_DURATION.total_seconds() // 60)
+                dur_val = prep_dur if prep_dur is not None else default_min
+                self.db.execute('UPDATE pedidos SET estado=?, preparacion_inicio=?, preparacion_duracion=? WHERE id=?', (new_state, started_at, dur_val, pid))
             elif current_state == 'PREPARANDO':
                 new_state = 'LISTO'
                 self.db.execute('UPDATE pedidos SET estado=? WHERE id=?', (new_state, pid))
-                play_sound_order_ready() # Sonido de campanas
+                # Al finalizar, reproducir sonido fuerte y notificar POS
+                try:
+                    play_sound_order_ready()
+                except:
+                    pass
+                # Intentar notificar la pestaña POS (si existe) para refrescar y alertar
+                try:
+                    app = self.winfo_toplevel()
+                    if hasattr(app, 'notebook'):
+                        for i in range(app.notebook.index('end')):
+                            if app.notebook.tab(i, 'text') == 'Caja / POS':
+                                pos_frame = app.nametowidget(app.notebook.tabs()[i])
+                                if hasattr(pos_frame, 'refresh_unpaid_orders'):
+                                    pos_frame.refresh_unpaid_orders()
+                                    if hasattr(pos_frame, 'notify_order_ready'):
+                                        try:
+                                            pos_frame.notify_order_ready(f'Pedido Listo: {numero}')
+                                        except:
+                                            pass
+                                    # Reproducir un sonido de notificación en POS
+                                    try:
+                                        play_sound_new_order()
+                                    except:
+                                        pass
+                                break
+                except Exception:
+                    logging.exception('Error notificando POS sobre pedido listo')
             else:
                 return 
             
@@ -1829,7 +2263,7 @@ class AdminFrame(tk.Canvas):
         ttk.Label(self.products_frame, text="Gestión de Menú y Productos", font=(None, 16, 'bold')).pack(anchor='w', pady=(0, 10))
         
         # Tabla de productos
-        cols = ('ID', 'Nombre', 'Categoría', 'Precio', 'Emoji', 'Disponible')
+        cols = ('ID', 'Nombre', 'Categoría', 'Precio', 'Emoji', 'Disponible', 'Prep (min)')
         self.menu_tree = ttk.Treeview(self.products_frame, columns=cols, show='headings', bootstyle="info", height=10)
         for c in cols:
             self.menu_tree.heading(c, text=c)
@@ -1860,6 +2294,10 @@ class AdminFrame(tk.Canvas):
         ttk.Label(inputs, text='Emoji:').grid(row=1, column=2, padx=5, pady=5)
         self.e_prod_emoji = ttk.Entry(inputs)
         self.e_prod_emoji.grid(row=1, column=3, padx=5, pady=5, sticky='ew')
+
+        ttk.Label(inputs, text='Prep (min):').grid(row=2, column=0, padx=5, pady=5)
+        self.e_prod_prep = ttk.Entry(inputs)
+        self.e_prod_prep.grid(row=2, column=1, padx=5, pady=5, sticky='ew')
         
         inputs.columnconfigure((1, 3), weight=1)
         
@@ -1872,21 +2310,32 @@ class AdminFrame(tk.Canvas):
     def refresh_menu(self):
         """Actualiza la tabla de productos del menú."""
         for r in self.menu_tree.get_children(): self.menu_tree.delete(r)
-        rows = self.db.fetch_all('SELECT id, nombre, categoria, precio, emoji, disponible FROM productos_menu')
+        rows = self.db.fetch_all('SELECT id, nombre, categoria, precio, emoji, disponible, prep_duration FROM productos_menu')
         for r in rows:
             disp = "SÍ" if r[5] else "NO"
-            self.menu_tree.insert('', 'end', values=(r[0], r[1], r[2], f"${r[3]:.2f}", r[4], disp))
+            prep = r[6] if r[6] is not None else ''
+            self.menu_tree.insert('', 'end', values=(r[0], r[1], r[2], f"${r[3]:.2f}", r[4], disp, prep))
 
     def create_product(self):
         """Inserta un nuevo producto en el menú."""
         n, p, c, e = self.e_prod_name.get().strip(), self.e_prod_price.get().strip(), self.e_prod_cat.get().strip(), self.e_prod_emoji.get().strip()
+        prep_val = self.e_prod_prep.get().strip() if hasattr(self, 'e_prod_prep') else ''
+        try:
+            prep_int = int(prep_val) if prep_val else None
+        except:
+            prep_int = None
         if not n or not p:
             messagebox.showwarning('Error', 'Nombre y precio son obligatorios')
             return
         try:
-            self.db.execute('INSERT INTO productos_menu (nombre, precio, categoria, emoji) VALUES (?,?,?,?)', (n, float(p), c, e or '🍽'))
+            self.db.execute('INSERT INTO productos_menu (nombre, precio, categoria, emoji, prep_duration) VALUES (?,?,?,?,?)', (n, float(p), c, e or '🍽', prep_int))
             messagebox.showinfo('Éxito', 'Producto añadido al menú')
-            for entry in (self.e_prod_name, self.e_prod_price, self.e_prod_emoji): entry.delete(0, 'end')
+            for entry in (self.e_prod_name, self.e_prod_price, self.e_prod_emoji, getattr(self, 'e_prod_prep', None)):
+                if entry:
+                    try:
+                        entry.delete(0, 'end')
+                    except:
+                        pass
             self.refresh_menu()
         except Exception as err:
             logging.error(f"Error al crear el producto: {err}")
@@ -1960,6 +2409,9 @@ class LoginWindow(ttk.Toplevel):
         self.username.focus_set()
         self.bind('<Return>', lambda e: self.try_login()) # Enter para loguear
         self.bind('<Escape>', lambda e: self.cancel())    # Escape para cerrar
+        
+        # Manejar el cierre por la "X" de la ventana
+        self.protocol("WM_DELETE_WINDOW", self.cancel)
 
     def try_login(self):
         """Verifica el usuario y contraseña contra la base de datos."""
@@ -2070,15 +2522,15 @@ class App(ttk.Window):
             pass
 
     def run_login_loop(self):
-        """Maneja el proceso de inicio de sesión hasta que sea exitoso o se cancele."""
+        """Maneja el proceso de inicio de sesión hasta que sea exitoso o se cierre la ventana."""
         while not self.user:
             login = LoginWindow(self, self.db)
             self.wait_window(login)
             if not self.user:
-                if not messagebox.askretrycancel("Login Requerido", "¿Desea intentar iniciar sesión nuevamente?"):
-                    self.destroy()
-                    sys.exit(0) # Salida forzada para evitar continuar con el __init__
-                    return
+                # Si el usuario es None, significa que cerró la ventana o canceló
+                self.destroy()
+                sys.exit(0) # Salida total inmediata
+                return
 
     def _check_session_periodically(self):
         """Verifica si la sesión sigue siendo válida."""
@@ -2317,87 +2769,61 @@ class App(ttk.Window):
         # Llamada inicial proactiva
         home.after(100, render_dashboard)
 
-        # --- Carga Dinámica de Pestañas según Rol ---
-        # Solo se añaden las pestañas a las que el usuario tiene permiso de acceder.
-        # IMPORTANTE: Se añadió 'administrador' y 'admin' para asegurar el acceso total.
-        if role in ('administrador', 'admin', 'supervisor'):
-            whatsapp_tab = WhatsAppFrame(self.notebook, self.db)
-            self.notebook.add(whatsapp_tab, text='WhatsApp Web')
-
-        if role in ('administrador', 'admin', 'cajera', 'supervisor'):
-            pos_tab = POSFrame(self.notebook, self.db, user=self.user)
-            self.notebook.add(pos_tab, text='Caja / POS')
-
-        if role in ('administrador', 'admin', 'mesero', 'supervisor'):
-            mesero_tab = MeseroFrame(self.notebook, self.db, user=self.user)
-            self.notebook.add(mesero_tab, text='Mesero')
-
-        if role in ('administrador', 'admin', 'cocina'):
-            kds_tab = KDSFrame(self.notebook, self.db, user=self.user)
-            self.notebook.add(kds_tab, text='Cocina (KDS)')
-
-        if role in ('administrador', 'admin', 'supervisor', 'super'):
-            admin_tab = AdminFrame(self.notebook, self.db)
-            self.notebook.add(admin_tab, text='Admin')
-
-        # --- Atajos de Teclado Globales ---
-        # CTRL + W para WhatsApp, CTRL + P para POS, CTRL + M para Mesero, CTRL + K para KDS, CTRL + A para Admin
-        self.bind_all('<Control-w>', lambda e: self.open_whatsapp() if role in ('administrador','admin','supervisor') else None)
-        self.bind_all('<Control-p>', lambda e: self.open_pos() if role in ('administrador','admin','cajera','supervisor') else None)
-        self.bind_all('<Control-m>', lambda e: self.open_mesero() if role in ('administrador','admin','mesero','supervisor') else None)
-        self.bind_all('<Control-k>', lambda e: self.open_kds() if role in ('administrador','admin','cocina') else None)
-        self.bind_all('<Control-a>', lambda e: self.open_admin() if role in ('administrador','admin','supervisor') else None)
+        # --- Carga Dinámica de Pestañas según Rol (OPTIMIZADO) ---
+        # No cargamos el contenido de las pestañas aquí para que el inicio sea instantáneo.
+        # Las pestañas se crearán bajo demanda en los métodos open_...
+        pass
 
     def open_whatsapp(self):
         """Cambia a la pestaña de WhatsApp Web y lanza automáticamente la ventana integrada."""
-        for i in range(self.notebook.index('end')):
-            if self.notebook.tab(i, 'text') == 'WhatsApp Web':
-                self.notebook.select(i)
-                frame = self.notebook.nametowidget(self.notebook.tabs()[i])
-                # Lanzar WhatsApp automáticamente al entrar
-                if hasattr(frame, 'connect_wa'):
-                    frame.connect_wa()
-                return
+        idx, frame = self._get_or_create_tab('WhatsApp Web', WhatsAppFrame)
+        self.notebook.select(idx)
+        # Lanzar WhatsApp automáticamente al entrar
+        if hasattr(frame, 'connect_wa'):
+            frame.connect_wa()
 
     def open_pos(self):
         """Cambia a la pestaña del Punto de Venta."""
-        for i in range(self.notebook.index('end')):
-            if self.notebook.tab(i, 'text') == 'Caja / POS':
-                self.notebook.select(i)
-                frame = self.notebook.nametowidget(self.notebook.tabs()[i])
-                # Solo renderizar si no hay hijos o para refrescar datos importantes
-                if hasattr(frame, 'products_frame') and not frame.products_frame.winfo_children():
-                    if hasattr(frame, 'render_products'): frame.render_products()
-                if hasattr(frame, 'refresh_unpaid_orders'): frame.refresh_unpaid_orders()
-                return
+        idx, frame = self._get_or_create_tab('Caja / POS', POSFrame)
+        self.notebook.select(idx)
+        # Solo renderizar si no hay hijos o para refrescar datos importantes
+        if hasattr(frame, 'products_frame') and not frame.products_frame.winfo_children():
+            if hasattr(frame, 'render_products'): frame.render_products()
+        if hasattr(frame, 'refresh_unpaid_orders'): frame.refresh_unpaid_orders()
 
     def open_mesero(self):
         """Cambia a la pestaña de Mesero."""
-        for i in range(self.notebook.index('end')):
-            if self.notebook.tab(i, 'text') == 'Mesero':
-                self.notebook.select(i)
-                frame = self.notebook.nametowidget(self.notebook.tabs()[i])
-                if hasattr(frame, 'products_frame') and not frame.products_frame.winfo_children():
-                    if hasattr(frame, 'render_products'): frame.render_products()
-                return
+        idx, frame = self._get_or_create_tab('Mesero', MeseroFrame)
+        self.notebook.select(idx)
+        if hasattr(frame, 'products_frame') and not frame.products_frame.winfo_children():
+            if hasattr(frame, 'render_products'): frame.render_products()
 
     def open_kds(self):
         """Cambia a la pestaña de Cocina."""
-        for i in range(self.notebook.index('end')):
-            if self.notebook.tab(i, 'text') == 'Cocina (KDS)':
-                self.notebook.select(i)
-                frame = self.notebook.nametowidget(self.notebook.tabs()[i])
-                if hasattr(frame, 'refresh'): frame.refresh()
-                return
+        idx, frame = self._get_or_create_tab('Cocina (KDS)', KDSFrame)
+        self.notebook.select(idx)
+        if hasattr(frame, 'refresh'): frame.refresh()
 
     def open_admin(self):
         """Cambia a la pestaña de Administración."""
+        idx, frame = self._get_or_create_tab('Admin', AdminFrame)
+        self.notebook.select(idx)
+        if hasattr(frame, 'refresh'): frame.refresh()
+
+    def _get_or_create_tab(self, name, frame_class):
+        """Busca una pestaña por nombre o la crea si no existe (Lazy Loading)."""
         for i in range(self.notebook.index('end')):
-            if self.notebook.tab(i, 'text') == 'Admin':
-                self.notebook.select(i)
-                frame = self.notebook.nametowidget(self.notebook.tabs()[i])
-                if hasattr(frame, 'refresh'): frame.refresh()
-                return
+            if self.notebook.tab(i, 'text') == name:
+                return i, self.notebook.nametowidget(self.notebook.tabs()[i])
+        
+        # Si no existe, crearla dinámicamente
+        if frame_class in (POSFrame, MeseroFrame, KDSFrame):
+            frame = frame_class(self.notebook, self.db, user=self.user)
+        else:
+            frame = frame_class(self.notebook, self.db)
+            
+        self.notebook.add(frame, text=name)
+        return self.notebook.index('end') - 1, frame
 
     def logout(self):
         """Cierra la sesión del usuario y regresa a la pantalla de login."""
