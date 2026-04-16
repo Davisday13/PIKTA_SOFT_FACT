@@ -14676,3 +14676,11 @@ Traceback (most recent call last):
     printer_name = self.find_pos_printer()
                    ^^^^^^^^^^^^^^^^^^^^^
 AttributeError: 'AdminFrame' object has no attribute 'find_pos_printer'
+2026-04-14 20:16:27,704 - ERROR - Error al imprimir: (31, 'ShellExecute', 'Uno de los dispositivos conectados al sistema no funciona.')
+2026-04-14 20:17:09,095 - ERROR - Error al procesar pago: 'NoneType' object has no attribute 'upper'
+2026-04-14 20:17:15,144 - ERROR - Error al procesar pago: 'NoneType' object has no attribute 'upper'
+2026-04-14 20:17:20,120 - ERROR - Error al procesar pago: 'NoneType' object has no attribute 'upper'
+2026-04-14 20:17:27,519 - ERROR - Error al procesar pago: 'NoneType' object has no attribute 'upper'
+2026-04-14 20:24:34,907 - ERROR - Error al procesar pago: 'NoneType' object has no attribute 'upper'
+2026-04-14 20:28:17,164 - ERROR - Error al procesar pago: 'NoneType' object has no attribute 'upper'
+2026-04-14 20:41:27,661 - ERROR - Error al procesar pago: 'NoneType' object has no attribute 'upper'

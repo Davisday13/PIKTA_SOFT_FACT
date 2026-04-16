@@ -210,22 +210,35 @@ try:
 except Exception:
     PIL_AVAILABLE = False
 
+# Cache global para imágenes para mejorar rendimiento
+IMAGE_CACHE = {}
+
 def load_image(path, size=None):
     """
-    Carga una imagen desde el disco.
+    Carga una imagen desde el disco con soporte para caché.
     Si Pillow está instalado, permite cambiar el tamaño (redimensionar).
-    Si no, usa el PhotoImage básico de Tkinter (solo PNG/GIF).
     """
     if not os.path.exists(path):
         return None
+    
+    # Crear una clave de caché única basada en la ruta y el tamaño
+    cache_key = (path, size)
+    if cache_key in IMAGE_CACHE:
+        return IMAGE_CACHE[cache_key]
+
     try:
         if PIL_AVAILABLE:
             img = Image.open(path)
             if size:
+                # Usar remuestreo rápido si no es crítico, o LANCZOS para calidad
                 img = img.resize(size, Image.LANCZOS)
-            return ImageTk.PhotoImage(img)
+            photo = ImageTk.PhotoImage(img)
+            IMAGE_CACHE[cache_key] = photo
+            return photo
         else:
-            return tk.PhotoImage(file=path)
+            photo = tk.PhotoImage(file=path)
+            IMAGE_CACHE[cache_key] = photo
+            return photo
     except Exception:
         return None
 
@@ -239,176 +252,253 @@ def center_window(win, width, height):
     y = (sh - height) // 3 # Un poco más arriba del centro absoluto para mejor visibilidad
     win.geometry(f"{width}x{height}+{x}+{y}")
 
-LICENSE_KEY_PRO = "PIKTA-2026-PRO-A1B2C3D4"
-LICENSE_KEY_BIZ = "PIKTA-2026-BIZ-E5F6G7H8"
-LICENSE_KEY_ENT = "PIKTA-2026-ENT-I9J0K1L2"
-LICENSE_KEY_ULT = "PIKTA-2026-ULT-M3N4O5P6"
-TRIAL_DAYS = 30
-
-LICENSE_TYPES = {
-    'PRO': {'name': 'Anual', 'days': 365, 'key': LICENSE_KEY_PRO},
-    'BIZ': {'name': '3 Años', 'days': 1095, 'key': LICENSE_KEY_BIZ},
-    'ENT': {'name': '5 Años', 'days': 1825, 'key': LICENSE_KEY_ENT},
-    'ULT': {'name': 'Perpetua', 'days': None, 'key': LICENSE_KEY_ULT},
-}
-
 def verify_license():
-    """Verifica si el sistema está activado o en período de prueba."""
-    db_name = "PIKTA_SOFT.db"
-    if not os.path.exists(db_name):
-        return {'status': 'trial', 'days_left': TRIAL_DAYS, 'type': None}
-    try:
-        conn = sqlite3.connect(db_name, timeout=5.0)
-        conn.row_factory = sqlite3.Row
-        cur = conn.cursor()
-        cur.execute("SELECT valor FROM sistema_config WHERE clave = 'install_date'")
-        row = cur.fetchone()
-        if not row:
-            conn.close()
-            return {'status': 'trial', 'days_left': TRIAL_DAYS, 'type': None}
-        install_date = datetime.fromisoformat(row[0])
-        cur.execute("SELECT valor FROM sistema_config WHERE clave = 'activated'")
-        row = cur.fetchone()
-        activated = row[0] if row else '0'
-        cur.execute("SELECT valor FROM sistema_config WHERE clave = 'license_expires'")
-        row = cur.fetchone()
-        license_expires = row[0] if row else None
-        cur.execute("SELECT valor FROM sistema_config WHERE clave = 'license_type'")
-        row = cur.fetchone()
-        license_type = row[0] if row else None
-        if activated == '1':
-            if license_expires:
-                expires = datetime.fromisoformat(license_expires)
-                if expires < datetime.now():
-                    conn.close()
-                    return {'status': 'expired', 'days_left': 0, 'type': license_type}
-                days_left = (expires - datetime.now()).days
-                conn.close()
-                return {'status': 'activated', 'days_left': days_left, 'type': license_type}
-            conn.close()
-            return {'status': 'activated', 'days_left': None, 'type': license_type}
-        days_passed = (datetime.now() - install_date).days
-        days_left = max(0, TRIAL_DAYS - days_passed)
-        conn.close()
-        if days_left <= 0:
-            return {'status': 'expired', 'days_left': 0, 'type': None}
-        return {'status': 'trial', 'days_left': days_left, 'type': None}
-    except Exception:
-        return {'status': 'trial', 'days_left': TRIAL_DAYS, 'type': None}
+    """Deshabilitado - siempre retorna activado."""
+    return {'status': 'activated', 'days_left': None, 'type': 'FULL'}
 
 def activate_license(key, db):
-    """Activa el sistema con la clave de licencia proporcionada."""
-    key_upper = key.strip().upper()
-    for lic_type, info in LICENSE_TYPES.items():
-        if key_upper == info['key']:
-            db.execute("UPDATE sistema_config SET valor = '1' WHERE clave = 'activated'")
-            db.execute("UPDATE sistema_config SET valor = ? WHERE clave = 'license_type'", (lic_type,))
-            if info['days']:
-                expires = datetime.now() + timedelta(days=info['days'])
-                db.execute("UPDATE sistema_config SET valor = ? WHERE clave = 'license_expires'", (expires.isoformat(),))
-            else:
-                db.execute("UPDATE sistema_config SET valor = NULL WHERE clave = 'license_expires'")
-            return True
-    return False
+    """Deshabilitado - siempre retorna True."""
+    return True
 
 class LicenseWindow:
-    """Ventana modal para mostrar estado de licencia y permitir activación."""
+    """Deshabilitado - no hace nada."""
     def __init__(self, parent, db, on_close_callback=None):
-        self.result = False
-        self.db = db
-        self.on_close_callback = on_close_callback
-        top = tk.Toplevel(parent)
-        top.title("Activación del Sistema PIK'TA")
-        top.geometry("450x400")
-        center_window(top, 450, 400)
-        top.transient(parent)
-        top.grab_set()
-        self.top = top
-        logo_path = os.path.join('Imagenes', 'pikta2.png')
-        if os.path.exists(logo_path) and PIL_AVAILABLE:
-            try:
-                from PIL import Image, ImageTk
-                logo = Image.open(logo_path)
-                logo = logo.resize((100, 100), Image.LANCZOS)
-                self.logo_img = ImageTk.PhotoImage(logo)
-                ttk.Label(top, image=self.logo_img).pack(pady=10)
-            except:
-                pass
-        ttk.Label(top, text="SISTEMA POS PIK'TA", font=(None, 18, 'bold')).pack(pady=5)
-        ttk.Label(top, text="Gestión de Restaurante", font=(None, 12)).pack()
-        info = verify_license()
-        if info['status'] == 'activated':
-            lic_name = LICENSE_TYPES.get(info['type'], {}).get('name', 'Desconocida') if info['type'] else 'Lifetime'
-            days_msg = f" ({info['days_left']} días restantes)" if info['days_left'] else ""
-            ttk.Label(top, text=f"✓ SISTEMA ACTIVADO - {lic_name}{days_msg}", font=(None, 12, 'bold'), bootstyle="success").pack(pady=20)
-            ttk.Button(top, text="Continuar", command=self._on_continue, bootstyle="success", width=20).pack(pady=10)
-        elif info['status'] == 'expired':
-            ttk.Label(top, text="⚠ PERÍODO DE PRUEBA EXPIRADO", font=(None, 14, 'bold'), bootstyle="danger").pack(pady=10)
-            ttk.Label(top, text="Licencias disponibles:", font=(None, 11, 'bold')).pack(pady=5)
-            for lt, li in LICENSE_TYPES.items():
-                days_str = f"({li['days']} días)" if li['days'] else "(Permanente)"
-                ttk.Label(top, text=f"• {li['name']} - {days_str}", font=(None, 10)).pack()
-            ttk.Label(top, text="\nIngrese su clave de activación:", font=(None, 11)).pack(pady=5)
-            self.key_entry = ttk.Entry(top, width=35, font=(None, 12))
-            self.key_entry.pack(pady=10)
-            ttk.Button(top, text="ACTIVAR SISTEMA", command=self.try_activate, bootstyle="primary", width=20).pack(pady=10)
-            ttk.Label(top, text=f"Clave de licencia proporcionada por YAFA SOLUTIONS", font=(None, 8), bootstyle="secondary").pack(pady=5)
-        else:
-            ttk.Label(top, text=f"📅 Período de Prueba: {info['days_left']} días restantes", font=(None, 14, 'bold'), bootstyle="info").pack(pady=20)
-            ttk.Label(top, text="Licencias disponibles:", font=(None, 11, 'bold')).pack(pady=5)
-            for lt, li in LICENSE_TYPES.items():
-                days_str = f"({li['days']} días)" if li['days'] else "(Permanente)"
-                ttk.Label(top, text=f"• {li['name']} - {days_str}", font=(None, 10)).pack()
-            ttk.Label(top, text="\nIngrese su clave de activación para usar sin límites:", font=(None, 11)).pack(pady=5)
-            self.key_entry = ttk.Entry(top, width=35, font=(None, 12))
-            self.key_entry.pack(pady=10)
-            ttk.Button(top, text="ACTIVAR", command=self.try_activate, bootstyle="primary", width=20).pack(pady=10)
-            ttk.Button(top, text="Usar Versión de Prueba", command=self._on_continue, bootstyle="secondary", width=20).pack(pady=5)
-        top.protocol("WM_DELETE_WINDOW", self.on_close)
-
-    def _on_continue(self):
-        self.top.destroy()
-        if self.on_close_callback:
-            self.on_close_callback()
-
-    def on_close(self):
-        """Maneja el cierre de la ventana de licencia."""
-        info = verify_license()
-        if info['status'] == 'expired':
-            self.top.destroy()
-            self.result = False
-            if self.on_close_callback:
-                self.on_close_callback()
-        else:
-            self.top.destroy()
-            if self.on_close_callback:
-                self.on_close_callback()
-
-    def try_activate(self):
-        key = self.key_entry.get()
-        if activate_license(key, self.db):
-            messagebox.showinfo("Activación", "¡Sistema activado correctamente!")
-            self.top.destroy()
-            if self.on_close_callback:
-                self.on_close_callback()
-        else:
-            messagebox.showerror("Error", "Clave de activación inválida.\nVerifique e intente de nuevo.")
-            play_sound_error()
+        if on_close_callback:
+            on_close_callback()
 
 
 class DatabaseManager:
     """
     Controlador de la base de datos SQLite.
-    Se encarga de crear las tablas, manejar las conexiones y realizar migraciones.
+    Optimizado para evitar bloqueos y mejorar rendimiento.
     """
 
     def __init__(self, db_name=DB_NAME):
         self.db_name = db_name
+        self._pragma_done = False
         self.init_db()
 
+    def _do_pragmas(self, conn):
+        """Configura pragmas de la BD una sola vez."""
+        if self._pragma_done:
+            return
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA synchronous=NORMAL")
+            conn.execute("PRAGMA cache_size=-2000")
+            self._pragma_done = True
+        except Exception:
+            pass
+
     def get_connection(self):
-        """Abre y retorna una conexión activa a la base de datos."""
-        return sqlite3.connect(self.db_name)
+        """Retorna conexión con timeout y pragmas optimizados."""
+        conn = sqlite3.connect(self.db_name, timeout=10.0)
+        self._do_pragmas(conn)
+        return conn
+
+    def init_db(self):
+        """Inicializa tablas de forma rápida y segura."""
+        conn = self.get_connection()
+        try:
+            cur = conn.cursor()
+            
+            # Tablas base
+            cur.execute('''CREATE TABLE IF NOT EXISTS usuarios (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                password TEXT NOT NULL,
+                rol TEXT NOT NULL,
+                nombre_completo TEXT
+            )''')
+
+            cur.execute('''CREATE TABLE IF NOT EXISTS productos_menu (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nombre TEXT NOT NULL,
+                descripcion TEXT,
+                precio REAL NOT NULL,
+                categoria TEXT,
+                emoji TEXT,
+                disponible BOOLEAN DEFAULT 1
+            )''')
+
+            cur.execute('''CREATE TABLE IF NOT EXISTS pedidos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                numero TEXT UNIQUE NOT NULL,
+                cliente_telefono TEXT,
+                cliente_nombre TEXT,
+                items TEXT NOT NULL,
+                subtotal REAL,
+                descuento REAL DEFAULT 0,
+                total REAL NOT NULL,
+                estado TEXT DEFAULT 'RECIBIDO',
+                canal TEXT,
+                metodo_pago TEXT,
+                pagado BOOLEAN DEFAULT 0,
+                notas TEXT,
+                mesa TEXT,
+                sesion_id INTEGER,
+                usuario_id INTEGER,
+                created_at TEXT,
+                factura_text TEXT
+            )''')
+
+            cur.execute('''CREATE TABLE IF NOT EXISTS inventario (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ingrediente TEXT NOT NULL UNIQUE,
+                cantidad REAL NOT NULL DEFAULT 0,
+                unidad TEXT NOT NULL,
+                stock_minimo REAL NOT NULL DEFAULT 0
+            )''')
+
+            cur.execute('''CREATE TABLE IF NOT EXISTS auditoria (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tabla TEXT NOT NULL,
+                accion TEXT NOT NULL,
+                usuario TEXT,
+                detalles TEXT,
+                datos_previos TEXT,
+                datos_nuevos TEXT,
+                fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )''')
+
+            cur.execute('''CREATE TABLE IF NOT EXISTS sistema_config (
+                clave TEXT PRIMARY KEY,
+                valor TEXT
+            )''')
+
+            cur.execute('''CREATE TABLE IF NOT EXISTS access_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                username TEXT,
+                action TEXT,
+                details TEXT,
+                created_at TEXT
+            )''')
+
+            cur.execute('''CREATE TABLE IF NOT EXISTS caja_sesiones (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                usuario_id INTEGER,
+                inicio TEXT,
+                inicial REAL DEFAULT 0,
+                monto_apertura REAL,
+                estado TEXT DEFAULT 'ABIERTO',
+                cierre_total REAL,
+                cierre_at TEXT,
+                reporte_texto TEXT
+            )''')
+
+            # Migraciones de columnas
+            for table, col, dtype in [
+                ('productos_menu', 'categoria', 'TEXT'),
+                ('productos_menu', 'emoji', 'TEXT'),
+                ('pedidos', 'subtotal', 'REAL'),
+                ('pedidos', 'descuento', 'REAL'),
+                ('pedidos', 'canal', 'TEXT'),
+                ('pedidos', 'mesa', 'TEXT'),
+                ('pedidos', 'metodo_pago', 'TEXT'),
+                ('pedidos', 'pagado', 'BOOLEAN'),
+                ('pedidos', 'created_at', 'TEXT'),
+                ('pedidos', 'factura_text', 'TEXT'),
+                ('caja_sesiones', 'reporte_texto', 'TEXT'),
+            ]:
+                try:
+                    cur.execute(f"PRAGMA table_info({table})")
+                    cols = [r[1] for r in cur.fetchall()]
+                    if col not in cols:
+                        cur.execute(f"ALTER TABLE {table} ADD COLUMN {col} {dtype}")
+                except Exception:
+                    pass
+
+            # Semillas solo si está vacío
+            cur.execute("SELECT COUNT(*) FROM usuarios")
+            if cur.fetchone()[0] == 0:
+                seeds = [
+                    ("Davis", "1234", "Administrador", "Davis Admin"),
+                    ("admin", "admin", "Administrador", "Administrador Sistema"),
+                    ("mesero", "1234", "Mesero", "Personal de Mesas"),
+                ]
+                for u, p, r, n in seeds:
+                    cur.execute('INSERT INTO usuarios VALUES (?,?,?,?)', 
+                               (u, hash_password(p), r, n))
+
+            cur.execute("SELECT COUNT(*) FROM productos_menu")
+            if cur.fetchone()[0] == 0:
+                basics = [
+                    ("Hamburguesa Clásica", 8.50, "🍔 Combos", "🍔"),
+                    ("Coca Cola 600ml", 2.00, "🥤 Bebidas", "🥤"),
+                ]
+                for n, p, c, e in basics:
+                    cur.execute('INSERT INTO productos_menu (nombre, precio, categoria, emoji) VALUES (?,?,?,?)', (n, p, c, e))
+
+            conn.commit()
+        finally:
+            conn.close()
+
+    def log_access(self, user_id, username, action, details=''):
+        """Registra acceso sin bloquear la UI."""
+        try:
+            with self.get_connection() as conn:
+                cur = conn.cursor()
+                cur.execute('INSERT INTO access_logs (user_id, username, action, details, created_at) VALUES (?,?,?,?,?)',
+                            (user_id, username, action, details, datetime.now().isoformat()))
+        except Exception:
+            pass
+
+    def fetch_all(self, query, params=()):
+        """Consulta SELECT returning all rows."""
+        with self.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(query, params)
+            return cur.fetchall()
+
+    def fetch_one(self, query, params=()):
+        """Consulta SELECT returning one row."""
+        with self.get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(query, params)
+            return cur.fetchone()
+
+    def execute(self, query, params=()):
+        """INSERT/UPDATE/DELETE con reintentos automáticos."""
+        import time
+        for i in range(3):
+            try:
+                with self.get_connection() as conn:
+                    cur = conn.cursor()
+                    cur.execute(query, params)
+                    return cur.lastrowid
+            except sqlite3.OperationalError:
+                if i < 2:
+                    time.sleep(0.1)
+                    continue
+                raise
+            except Exception:
+                raise
+
+    def audit_log(self, tabla, accion, usuario=None, detalles='', prev=None, new=None):
+        """Registra en auditoría sin bloquear."""
+        try:
+            with self.get_connection() as conn:
+                cur = conn.cursor()
+                cur.execute('''INSERT INTO auditoria VALUES (?,?,?,?,?,?,?)''',
+                            (tabla, accion, usuario, detalles,
+                             json.dumps(prev) if prev else None,
+                             json.dumps(new) if new else None,
+                             datetime.now().isoformat()))
+        except Exception:
+            pass
+
+    def create_backup(self):
+        """Crea backup de la BD."""
+        if not os.path.exists('Backups'):
+            os.makedirs('Backups')
+        ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+        dst = os.path.join('Backups', f'PIkTA_backup_{ts}.db')
+        try:
+            shutil.copy2(self.db_name, dst)
+            return dst
+        except Exception:
+            return None
 
     def init_db(self):
         """Inicializa las tablas base y asegura que existan los campos necesarios."""
@@ -979,23 +1069,18 @@ class POSFrame(tk.Canvas):
 
     def refresh_unpaid_orders(self):
         """Consulta pedidos de meseros y de caja (para llevar) que aún no han sido pagados."""
-        # Solo refrescar si no hay un elemento seleccionado para evitar perder la selección del usuario
-        has_selection = bool(self.unpaid_tree.selection())
+        # Limpiar tabla actual
+        for r in self.unpaid_tree.get_children(): 
+            self.unpaid_tree.delete(r)
         
-        if not has_selection:
-            for r in self.unpaid_tree.get_children(): self.unpaid_tree.delete(r)
-            
-            # Incluimos 'LLEVAR' en la consulta para que el cajero pueda cobrarlos
-            query = "SELECT id, numero, mesa, total, created_at FROM pedidos WHERE pagado = 0 AND canal IN ('MESERO', 'LLEVAR') ORDER BY created_at DESC"
-            rows = self.db.fetch_all(query)
-            for r in rows:
-                # Si mesa es None (pedidos para llevar), mostrar 'PARA LLEVAR'
-                values = list(r)
-                if values[2] is None: values[2] = 'PARA LLEVAR'
-                self.unpaid_tree.insert('', 'end', values=values)
-        
-        # Programar el siguiente refresco automático en 5 segundos (5000 ms)
-        self.after(5000, self.refresh_unpaid_orders)
+        # Incluimos 'LLEVAR' en la consulta para que el cajero pueda cobrarlos
+        query = "SELECT id, numero, mesa, total, created_at FROM pedidos WHERE pagado = 0 AND canal IN ('MESERO', 'LLEVAR') ORDER BY created_at DESC"
+        rows = self.db.fetch_all(query)
+        for r in rows:
+            # Si mesa es None (pedidos para llevar), mostrar 'PARA LLEVAR'
+            values = list(r)
+            if values[2] is None: values[2] = 'PARA LLEVAR'
+            self.unpaid_tree.insert('', 'end', values=values)
 
     def on_unpaid_select(self, event):
         """Muestra el detalle del pedido seleccionado."""
@@ -1053,7 +1138,7 @@ class POSFrame(tk.Canvas):
         factura += f"    RECIBIDO:                 $ {paid_amount:>8.2f}\n"
         factura += f"    CAMBIO:                   $ {change:>8.2f}\n"
         factura += "    ------------------------------------\n"
-        factura += f"    MÉTODO DE PAGO: {metodo.upper()}\n"
+        factura += f"    MÉTODO DE PAGO: {metodo.upper() if metodo else 'NO ESPECIFICADO'}\n"
         factura += "    ------------------------------------\n"
         factura += "         ¡GRACIAS POR SU VISITA!\n"
         factura += "              REGRESE PRONTO\n"
@@ -1092,20 +1177,28 @@ class POSFrame(tk.Canvas):
                 # Generar Factura PRIMERO para guardarla en la BD
                 factura_text = self.generate_invoice(order_id, paid_amount, change)
                 
+                # Actualizar el pedido como pagado
                 self.db.execute('UPDATE pedidos SET pagado = 1, sesion_id = ?, metodo_pago = ?, factura_text = ? WHERE id = ?', 
-                                (self.session_id, method, factura_text, order_id))
+                                (self.session_id, method, factura_text, int(order_id)))
+                
+                # Forzar limpieza de selección para evitar conflictos
+                self.unpaid_tree.selection_remove(self.unpaid_tree.selection())
                 
                 messagebox.showinfo('Éxito', f'Pago procesado correctamente.\nCambio: ${change:.2f}')
                 
                 # Mostrar factura y opción de imprimir
                 self.show_invoice_popup(factura_text)
                 
+                # Refrescar lista y UI
                 self.refresh_unpaid_orders()
+                self.update() # Forzar actualización de UI
                 self.detail_text.config(state='normal')
                 self.detail_text.delete('1.0', 'end')
                 self.detail_text.config(state='disabled')
                 self.total_cobro_label.config(text="Total a Cobrar: $0.00")
                 self.pay_amount_var.set("0.00")
+                self.cart.clear()
+                self.update_cart_display()
                 
         except ValueError:
             messagebox.showerror("Error", "Ingrese un monto válido.")
@@ -1117,7 +1210,7 @@ class POSFrame(tk.Canvas):
         """Muestra la factura o reporte en una ventana emergente con opción de impresión."""
         top = tk.Toplevel(self)
         top.title(title)
-        top.geometry("400x650")
+        top.geometry("600x650")
         
         # Logo en la factura popup
         logo_path = os.path.join('Imagenes', 'pikta2.png')
@@ -1225,19 +1318,35 @@ class POSFrame(tk.Canvas):
                 filename = os.path.join(temp_dir, base_name)
                 img.save(filename)
                 
-                # Enviar a imprimir usando la impresora detectada
-                try:
-                    if WIN32_PRINT_AVAILABLE and printer_name:
-                        # Usar win32api para imprimir en la impresora específica
-                        win32api.ShellExecute(0, "printto", filename, f'"{printer_name}"', ".", 0)
-                        messagebox.showinfo("Impresión", f"Enviado a: {printer_name}\nCajón abierto.")
-                    else:
-                        os.startfile(filename, "print")
-                        messagebox.showinfo("Impresión", "Enviado a impresora por defecto.")
-                except Exception as e:
-                    logging.error(f"Error al imprimir: {e}")
-                    # Fallback
-                    os.startfile(filename)
+                def print_invoice():
+                    nonlocal printer_name
+                    if not printer_name:
+                        printer_name = find_pos_printer()
+                    if not printer_name:
+                        messagebox.showwarning("Sin impresora", "No se detectó impresora térmica.\nSe abrirá el archivo para impresión manual.")
+                        os.startfile(filename)
+                        return
+                    try:
+                        if WIN32_PRINT_AVAILABLE:
+                            try:
+                                win32api.ShellExecute(0, "printto", filename, f'"{printer_name}"', ".", 0)
+                                messagebox.showinfo("Impresión", f"Enviado a: {printer_name}\nCajón abierto.")
+                            except Exception as e:
+                                logging.warning(f"printto falló: {e}, intentando print directo")
+                                try:
+                                    win32api.ShellExecute(0, "print", filename, None, ".", 0)
+                                    messagebox.showinfo("Impresión", f"Enviado a: {printer_name}")
+                                except Exception as e2:
+                                    logging.error(f"Error al imprimir: {e2}")
+                                    os.startfile(filename)
+                                    messagebox.showinfo("Impresión", "No se pudo enviar a la impresora.\nSe abrió el archivo para impresión manual.")
+                        else:
+                            os.startfile(filename, "print")
+                            messagebox.showinfo("Impresión", "Enviado a impresora por defecto.")
+                    except Exception as e:
+                        logging.error(f"Error al imprimir: {e}")
+                        os.startfile(filename)
+                        messagebox.showinfo("Impresión", "Error de impresión.\nSe abrió el archivo para impresión manual.")
             else:
                 # Fallback a texto plano
                 base_name = f"factura_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
@@ -2522,28 +2631,31 @@ class AdminFrame(tk.Canvas):
 
     def open_section(self, index, title):
         """Abre una sección específica y actualiza la cabecera de forma instantánea."""
-        # 1. Carga perezosa ultra-rápida
+        # 1. Carga perezosa ultra-rápida (Crear widgets si no existen)
         if index == 1 and not hasattr(self, 'inv_tree'): self.setup_inventory()
         elif index == 2 and not hasattr(self, 'user_tree'): self.setup_users()
         elif index == 3 and not hasattr(self, 'audit_tree'): self.setup_security()
         elif index == 4 and not hasattr(self, 'menu_tree'): self.setup_menu()
         elif index == 5 and not hasattr(self, 'cierre_list'): self.setup_cierre_history()
 
-        # 2. Cambiar de pestaña inmediatamente
+        # 2. Cambiar de pestaña e interfaz inmediatamente
         self.notebook.select(index)
         self.title_lbl.config(text=f"📊 {title}")
         self.btn_back_main.pack_forget()
         self.btn_back_admin.pack(side='right', padx=5)
         
-        # 3. Refrescar SOLO los datos necesarios para evitar retrasos
-        if index == 1: self.refresh_inventory()
-        elif index == 2: self.refresh_users()
-        elif index == 3: self.refresh_security()
-        elif index == 4: self.refresh_menu()
-        elif index == 5: self.refresh_cierres()
-        
-        # Forzar actualización de interfaz para que se sienta instantáneo
+        # 3. Forzar actualización visual antes de la carga de datos pesada
         self.update_idletasks()
+
+        # 4. Refrescar datos con un ligero retraso para no bloquear la animación de cambio de pestaña
+        def delayed_refresh():
+            if index == 1: self.refresh_inventory()
+            elif index == 2: self.refresh_users()
+            elif index == 3: self.refresh_security()
+            elif index == 4: self.refresh_menu()
+            elif index == 5: self.refresh_cierres()
+        
+        self.after(10, delayed_refresh)
 
     def show_admin_menu(self):
         """Vuelve al menú principal de administración."""
@@ -2663,25 +2775,14 @@ class AdminFrame(tk.Canvas):
         self.lbl_sessions = ttk.Label(m_inner, text="👥 Sesiones activas: 0", font=(None, 14), bootstyle="info")
         self.lbl_sessions.grid(row=0, column=1, padx=30)
         
-        info = verify_license()
-        if info['status'] == 'activated':
-            lic_name = LICENSE_TYPES.get(info['type'], {}).get('name', 'Lifetime') if info['type'] else 'Lifetime'
-            days_msg = f" ({info['days_left']} días)" if info['days_left'] else ""
-            self.lbl_license = ttk.Label(m_inner, text=f"✓ {lic_name}{days_msg}", font=(None, 14), bootstyle="success")
-        elif info['status'] == 'trial':
-            self.lbl_license = ttk.Label(m_inner, text=f"📅 Prueba: {info['days_left']} días", font=(None, 14), bootstyle="info")
-        else:
-            self.lbl_license = ttk.Label(m_inner, text="⚠ BLOQUEADO", font=(None, 14, 'bold'), bootstyle="danger")
+        self.lbl_license = ttk.Label(m_inner, text="✓ SISTEMA ACTIVADO", font=(None, 14), bootstyle="success")
         self.lbl_license.grid(row=0, column=2, padx=30)
         
         btn_backup = ttk.Button(m_inner, text="💾 Generar Respaldo DB", command=self.manual_backup, bootstyle="success", padding=10)
         btn_backup.grid(row=0, column=3, padx=30)
         
-        btn_activate = ttk.Button(m_inner, text="🔐 Activar Sistema", command=self.open_license_window, bootstyle="warning", padding=10)
-        btn_activate.grid(row=0, column=4, padx=30)
-        
         btn_test_print = ttk.Button(m_inner, text="🖨 Probar Impresora/Cajón", command=self.test_printer, bootstyle="info", padding=10)
-        btn_test_print.grid(row=0, column=5, padx=30)
+        btn_test_print.grid(row=0, column=4, padx=30)
 
         # --- Tabla de Auditoría ---
         ttk.Label(self.security_frame, text="Historial de Auditoría (Últimas Actividades)", font=(None, 16, 'bold')).pack(anchor='w', pady=15)
@@ -2773,17 +2874,8 @@ class AdminFrame(tk.Canvas):
             messagebox.showinfo("Prueba", f"Enviado a imprimir por defecto (ShellExecute falló: {e})")
 
     def open_license_window(self):
-        """Abre la ventana de activación del sistema."""
-        LicenseWindow(self, self.db)
-        info = verify_license()
-        if info['status'] == 'activated':
-            lic_name = LICENSE_TYPES.get(info['type'], {}).get('name', 'Lifetime') if info['type'] else 'Lifetime'
-            days_msg = f" ({info['days_left']} días)" if info['days_left'] else ""
-            self.lbl_license.config(text=f"✓ {lic_name}{days_msg}", bootstyle="success")
-        elif info['status'] == 'trial':
-            self.lbl_license.config(text=f"📅 Prueba: {info['days_left']} días", bootstyle="info")
-        else:
-            self.lbl_license.config(text="⚠ BLOQUEADO", bootstyle="danger")
+        """Deshabilitado."""
+        messagebox.showinfo("Licencia", "Sistema permanentemente activado.")
 
     def refresh_security(self):
         """Actualiza las métricas y logs de seguridad."""
@@ -3063,8 +3155,7 @@ class App(ttk.Window):
         self.user = None
         self.session_token = None
 
-        self._check_and_show_license()
-
+        # Sin verificación de licencia
         self.run_login_loop()
 
         self.build()
@@ -3082,26 +3173,6 @@ class App(ttk.Window):
         footer.pack(fill='x', side='bottom')
         ttk.Label(footer, text='SISTEMA POS PIK\'TA | Desarrollado por YAFA SOLUTIONS © 2026', 
                   font=(None, 10, 'bold'), bootstyle="inverse-secondary").pack()
-
-    def _check_and_show_license(self):
-        """Muestra ventana de licencia si es necesario."""
-        info = verify_license()
-        if info['status'] == 'trial':
-            messagebox.showinfo("Bienvenida", f"Período de prueba: {info['days_left']} días restantes.\nAdquiera una licencia para uso sin límites.")
-        elif info['status'] == 'expired':
-            self.withdraw()
-            lic_win = LicenseWindow(self, self.db)
-            self.wait_window(lic_win.top)
-            info = verify_license()
-            if info['status'] == 'expired':
-                messagebox.showerror("Bloqueado", "Debe activar el sistema para continuar.")
-                self.destroy()
-                sys.exit(0)
-            else:
-                self.deiconify()
-        else:
-            lic_name = LICENSE_TYPES.get(info['type'], {}).get('name', 'Lifetime') if info['type'] else 'Lifetime'
-            messagebox.showinfo("Sistema Activado", f"Licencia {lic_name} activa.")
 
     def _on_tab_changed(self, event):
         """Asegura que al cambiar de pestaña, el widget principal reciba el foco."""
