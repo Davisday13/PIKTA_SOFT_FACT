@@ -36,12 +36,6 @@ import hashlib
 import secrets
 import winsound
 import shutil
-try:
-    import win32print
-    import win32api
-    WIN32_PRINT_AVAILABLE = True
-except ImportError:
-    WIN32_PRINT_AVAILABLE = False
 
 # =============================================================================
 # FUNCIONES DE SONIDO Y NOTIFICACIÓN
@@ -73,26 +67,6 @@ def play_sound_order_ready():
             time.sleep(0.1)
     except:
         pass
-
-# =============================================================================
-# FUNCIONES DE IMPRESIÓN Y HARDWARE
-# =============================================================================
-
-def find_pos_printer():
-    """Busca automáticamente una impresora térmica USB conectada."""
-    if not WIN32_PRINT_AVAILABLE: return None
-    try:
-        # 1. Intentar con la impresora por defecto
-        default = win32print.GetDefaultPrinter()
-        # 2. Si no es obvia, buscar una que diga POS, Thermal o 80
-        printers = win32print.EnumPrinters(win32print.PRINTER_ENUM_LOCAL | win32print.PRINTER_ENUM_CONNECTIONS)
-        for flags, description, name, comment in printers:
-            n = name.upper()
-            if "POS" in n or "THERMAL" in n or "80MM" in n or "58MM" in n or "XP-80" in n:
-                return name
-        return default
-    except:
-        return None
 
 # =============================================================================
 # FUNCIONES DE SEGURIDAD (ENCRIPTACIÓN)
@@ -210,35 +184,22 @@ try:
 except Exception:
     PIL_AVAILABLE = False
 
-# Cache global para imágenes para mejorar rendimiento
-IMAGE_CACHE = {}
-
 def load_image(path, size=None):
     """
-    Carga una imagen desde el disco con soporte para caché.
+    Carga una imagen desde el disco.
     Si Pillow está instalado, permite cambiar el tamaño (redimensionar).
+    Si no, usa el PhotoImage básico de Tkinter (solo PNG/GIF).
     """
     if not os.path.exists(path):
         return None
-    
-    # Crear una clave de caché única basada en la ruta y el tamaño
-    cache_key = (path, size)
-    if cache_key in IMAGE_CACHE:
-        return IMAGE_CACHE[cache_key]
-
     try:
         if PIL_AVAILABLE:
             img = Image.open(path)
             if size:
-                # Usar remuestreo rápido si no es crítico, o LANCZOS para calidad
                 img = img.resize(size, Image.LANCZOS)
-            photo = ImageTk.PhotoImage(img)
-            IMAGE_CACHE[cache_key] = photo
-            return photo
+            return ImageTk.PhotoImage(img)
         else:
-            photo = tk.PhotoImage(file=path)
-            IMAGE_CACHE[cache_key] = photo
-            return photo
+            return tk.PhotoImage(file=path)
     except Exception:
         return None
 
@@ -252,253 +213,20 @@ def center_window(win, width, height):
     y = (sh - height) // 3 # Un poco más arriba del centro absoluto para mejor visibilidad
     win.geometry(f"{width}x{height}+{x}+{y}")
 
-def verify_license():
-    """Deshabilitado - siempre retorna activado."""
-    return {'status': 'activated', 'days_left': None, 'type': 'FULL'}
-
-def activate_license(key, db):
-    """Deshabilitado - siempre retorna True."""
-    return True
-
-class LicenseWindow:
-    """Deshabilitado - no hace nada."""
-    def __init__(self, parent, db, on_close_callback=None):
-        if on_close_callback:
-            on_close_callback()
-
 
 class DatabaseManager:
     """
     Controlador de la base de datos SQLite.
-    Optimizado para evitar bloqueos y mejorar rendimiento.
+    Se encarga de crear las tablas, manejar las conexiones y realizar migraciones.
     """
 
     def __init__(self, db_name=DB_NAME):
         self.db_name = db_name
-        self._pragma_done = False
         self.init_db()
 
-    def _do_pragmas(self, conn):
-        """Configura pragmas de la BD una sola vez."""
-        if self._pragma_done:
-            return
-        try:
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("PRAGMA synchronous=NORMAL")
-            conn.execute("PRAGMA cache_size=-2000")
-            self._pragma_done = True
-        except Exception:
-            pass
-
     def get_connection(self):
-        """Retorna conexión con timeout y pragmas optimizados."""
-        conn = sqlite3.connect(self.db_name, timeout=10.0)
-        self._do_pragmas(conn)
-        return conn
-
-    def init_db(self):
-        """Inicializa tablas de forma rápida y segura."""
-        conn = self.get_connection()
-        try:
-            cur = conn.cursor()
-            
-            # Tablas base
-            cur.execute('''CREATE TABLE IF NOT EXISTS usuarios (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT UNIQUE NOT NULL,
-                password TEXT NOT NULL,
-                rol TEXT NOT NULL,
-                nombre_completo TEXT
-            )''')
-
-            cur.execute('''CREATE TABLE IF NOT EXISTS productos_menu (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                nombre TEXT NOT NULL,
-                descripcion TEXT,
-                precio REAL NOT NULL,
-                categoria TEXT,
-                emoji TEXT,
-                disponible BOOLEAN DEFAULT 1
-            )''')
-
-            cur.execute('''CREATE TABLE IF NOT EXISTS pedidos (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                numero TEXT UNIQUE NOT NULL,
-                cliente_telefono TEXT,
-                cliente_nombre TEXT,
-                items TEXT NOT NULL,
-                subtotal REAL,
-                descuento REAL DEFAULT 0,
-                total REAL NOT NULL,
-                estado TEXT DEFAULT 'RECIBIDO',
-                canal TEXT,
-                metodo_pago TEXT,
-                pagado BOOLEAN DEFAULT 0,
-                notas TEXT,
-                mesa TEXT,
-                sesion_id INTEGER,
-                usuario_id INTEGER,
-                created_at TEXT,
-                factura_text TEXT
-            )''')
-
-            cur.execute('''CREATE TABLE IF NOT EXISTS inventario (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                ingrediente TEXT NOT NULL UNIQUE,
-                cantidad REAL NOT NULL DEFAULT 0,
-                unidad TEXT NOT NULL,
-                stock_minimo REAL NOT NULL DEFAULT 0
-            )''')
-
-            cur.execute('''CREATE TABLE IF NOT EXISTS auditoria (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                tabla TEXT NOT NULL,
-                accion TEXT NOT NULL,
-                usuario TEXT,
-                detalles TEXT,
-                datos_previos TEXT,
-                datos_nuevos TEXT,
-                fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )''')
-
-            cur.execute('''CREATE TABLE IF NOT EXISTS sistema_config (
-                clave TEXT PRIMARY KEY,
-                valor TEXT
-            )''')
-
-            cur.execute('''CREATE TABLE IF NOT EXISTS access_logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER,
-                username TEXT,
-                action TEXT,
-                details TEXT,
-                created_at TEXT
-            )''')
-
-            cur.execute('''CREATE TABLE IF NOT EXISTS caja_sesiones (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                usuario_id INTEGER,
-                inicio TEXT,
-                inicial REAL DEFAULT 0,
-                monto_apertura REAL,
-                estado TEXT DEFAULT 'ABIERTO',
-                cierre_total REAL,
-                cierre_at TEXT,
-                reporte_texto TEXT
-            )''')
-
-            # Migraciones de columnas
-            for table, col, dtype in [
-                ('productos_menu', 'categoria', 'TEXT'),
-                ('productos_menu', 'emoji', 'TEXT'),
-                ('pedidos', 'subtotal', 'REAL'),
-                ('pedidos', 'descuento', 'REAL'),
-                ('pedidos', 'canal', 'TEXT'),
-                ('pedidos', 'mesa', 'TEXT'),
-                ('pedidos', 'metodo_pago', 'TEXT'),
-                ('pedidos', 'pagado', 'BOOLEAN'),
-                ('pedidos', 'created_at', 'TEXT'),
-                ('pedidos', 'factura_text', 'TEXT'),
-                ('caja_sesiones', 'reporte_texto', 'TEXT'),
-            ]:
-                try:
-                    cur.execute(f"PRAGMA table_info({table})")
-                    cols = [r[1] for r in cur.fetchall()]
-                    if col not in cols:
-                        cur.execute(f"ALTER TABLE {table} ADD COLUMN {col} {dtype}")
-                except Exception:
-                    pass
-
-            # Semillas solo si está vacío
-            cur.execute("SELECT COUNT(*) FROM usuarios")
-            if cur.fetchone()[0] == 0:
-                seeds = [
-                    ("Davis", "1234", "Administrador", "Davis Admin"),
-                    ("admin", "admin", "Administrador", "Administrador Sistema"),
-                    ("mesero", "1234", "Mesero", "Personal de Mesas"),
-                ]
-                for u, p, r, n in seeds:
-                    cur.execute('INSERT INTO usuarios VALUES (?,?,?,?)', 
-                               (u, hash_password(p), r, n))
-
-            cur.execute("SELECT COUNT(*) FROM productos_menu")
-            if cur.fetchone()[0] == 0:
-                basics = [
-                    ("Hamburguesa Clásica", 8.50, "🍔 Combos", "🍔"),
-                    ("Coca Cola 600ml", 2.00, "🥤 Bebidas", "🥤"),
-                ]
-                for n, p, c, e in basics:
-                    cur.execute('INSERT INTO productos_menu (nombre, precio, categoria, emoji) VALUES (?,?,?,?)', (n, p, c, e))
-
-            conn.commit()
-        finally:
-            conn.close()
-
-    def log_access(self, user_id, username, action, details=''):
-        """Registra acceso sin bloquear la UI."""
-        try:
-            with self.get_connection() as conn:
-                cur = conn.cursor()
-                cur.execute('INSERT INTO access_logs (user_id, username, action, details, created_at) VALUES (?,?,?,?,?)',
-                            (user_id, username, action, details, datetime.now().isoformat()))
-        except Exception:
-            pass
-
-    def fetch_all(self, query, params=()):
-        """Consulta SELECT returning all rows."""
-        with self.get_connection() as conn:
-            cur = conn.cursor()
-            cur.execute(query, params)
-            return cur.fetchall()
-
-    def fetch_one(self, query, params=()):
-        """Consulta SELECT returning one row."""
-        with self.get_connection() as conn:
-            cur = conn.cursor()
-            cur.execute(query, params)
-            return cur.fetchone()
-
-    def execute(self, query, params=()):
-        """INSERT/UPDATE/DELETE con reintentos automáticos."""
-        import time
-        for i in range(3):
-            try:
-                with self.get_connection() as conn:
-                    cur = conn.cursor()
-                    cur.execute(query, params)
-                    return cur.lastrowid
-            except sqlite3.OperationalError:
-                if i < 2:
-                    time.sleep(0.1)
-                    continue
-                raise
-            except Exception:
-                raise
-
-    def audit_log(self, tabla, accion, usuario=None, detalles='', prev=None, new=None):
-        """Registra en auditoría sin bloquear."""
-        try:
-            with self.get_connection() as conn:
-                cur = conn.cursor()
-                cur.execute('''INSERT INTO auditoria VALUES (?,?,?,?,?,?,?)''',
-                            (tabla, accion, usuario, detalles,
-                             json.dumps(prev) if prev else None,
-                             json.dumps(new) if new else None,
-                             datetime.now().isoformat()))
-        except Exception:
-            pass
-
-    def create_backup(self):
-        """Crea backup de la BD."""
-        if not os.path.exists('Backups'):
-            os.makedirs('Backups')
-        ts = datetime.now().strftime('%Y%m%d_%H%M%S')
-        dst = os.path.join('Backups', f'PIkTA_backup_{ts}.db')
-        try:
-            shutil.copy2(self.db_name, dst)
-            return dst
-        except Exception:
-            return None
+        """Abre y retorna una conexión activa a la base de datos."""
+        return sqlite3.connect(self.db_name)
 
     def init_db(self):
         """Inicializa las tablas base y asegura que existan los campos necesarios."""
@@ -543,8 +271,7 @@ class DatabaseManager:
                 mesa TEXT,
                 sesion_id INTEGER,
                 usuario_id INTEGER,
-                created_at TEXT,
-                factura_text TEXT
+                created_at TEXT
             )''')
 
             # Creación de tabla de inventario
@@ -568,39 +295,13 @@ class DatabaseManager:
                 fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )''')
 
-            # Tabla de configuración del sistema (Demo/Activación)
-            cur.execute('''CREATE TABLE IF NOT EXISTS sistema_config (
-                clave TEXT PRIMARY KEY,
-                valor TEXT
-            )''')
-
-            # Inicializar fecha de instalación si no existe
-            cur.execute("SELECT valor FROM sistema_config WHERE clave = 'install_date'")
-            if not cur.fetchone():
-                cur.execute("INSERT INTO sistema_config (clave, valor) VALUES ('install_date', ?)", (datetime.now().isoformat(),))
-            cur.execute("SELECT valor FROM sistema_config WHERE clave = 'activated'")
-            if not cur.fetchone():
-                cur.execute("INSERT INTO sistema_config (clave, valor) VALUES ('activated', '0')")
-            cur.execute("SELECT valor FROM sistema_config WHERE clave = 'license_type'")
-            if not cur.fetchone():
-                cur.execute("INSERT INTO sistema_config (clave, valor) VALUES ('license_type', '')")
-            cur.execute("SELECT valor FROM sistema_config WHERE clave = 'license_expires'")
-            if not cur.fetchone():
-                cur.execute("INSERT INTO sistema_config (clave, valor) VALUES ('license_expires', '')")
-
             # Migraciones: Asegurar columnas nuevas
             self._ensure_column('productos_menu', 'categoria', 'TEXT')
             self._ensure_column('productos_menu', 'emoji', 'TEXT')
-            self._ensure_column('pedidos', 'subtotal', 'REAL')
-            self._ensure_column('pedidos', 'descuento', 'REAL')
             self._ensure_column('pedidos', 'canal', 'TEXT')
             self._ensure_column('pedidos', 'usuario_id', 'INTEGER')
             self._ensure_column('pedidos', 'sesion_id', 'INTEGER')
             self._ensure_column('pedidos', 'created_at', 'TEXT')
-            self._ensure_column('pedidos', 'mesa', 'TEXT')
-            self._ensure_column('pedidos', 'metodo_pago', 'TEXT')
-            self._ensure_column('pedidos', 'pagado', 'BOOLEAN')
-            self._ensure_column('pedidos', 'factura_text', 'TEXT')
 
             # Migración de contraseñas a formato hash si es necesario
             cur.execute("SELECT id, username, password FROM usuarios")
@@ -667,13 +368,9 @@ class DatabaseManager:
                 monto_apertura REAL,
                 estado TEXT DEFAULT 'ABIERTO',
                 cierre_total REAL,
-                cierre_at TEXT,
-                reporte_texto TEXT
+                cierre_at TEXT
             )''')
 
-            # Migraciones: Asegurar columnas nuevas
-            self._ensure_column('caja_sesiones', 'reporte_texto', 'TEXT')
-            
             conn.commit()
 
     def audit_log(self, tabla, accion, usuario=None, detalles='', prev=None, new=None):
@@ -785,8 +482,7 @@ class POSFrame(tk.Canvas):
             def draw_pos_bg(e):
                 cw, ch = e.width, e.height
                 if cw < 10 or ch < 10: return
-                if abs(cw - self.last_bg_w) < 20 and abs(ch - self.last_bg_h) < 20: return
-                
+                if cw == self.last_bg_w and ch == self.last_bg_h: return
                 self.last_bg_w, self.last_bg_h = cw, ch
                 self.delete("bg")
                 img_res = self.bg_raw.resize((cw, ch), Image.LANCZOS)
@@ -823,7 +519,7 @@ class POSFrame(tk.Canvas):
         ttk.Label(self.header, text='🛒 PUNTO DE VENTA (Caja)', font=(None, 24, 'bold'), bootstyle="inverse-info").pack(side='left', padx=10)
         
         # Botones de acción rápida en la cabecera (más grandes)
-        ttk.Button(self.header, text='Regresar', command=lambda: self.master.select(0), bootstyle="secondary-outline", cursor="hand2", padding=10, takefocus=True).pack(side='right', padx=5)
+        ttk.Button(self.header, text='Regresar', command=lambda: self.master.select(0), bootstyle="secondary-outline", cursor="hand2", padding=10).pack(side='right', padx=5)
 
         self.btn_open_caja = ttk.Button(self.header, text='Abrir Caja', command=self.open_caja, bootstyle="success", cursor="hand2", padding=10)
         self.btn_open_caja.pack(side='right', padx=5)
@@ -862,77 +558,27 @@ class POSFrame(tk.Canvas):
         self.products_canvas.pack(side="left", fill="both", expand=True)
         self.scrollbar.pack(side="right", fill="y")
 
-        # Lado derecho de Venta Directa: Carrito (Estilo Excel)
-        right_v = ttk.Frame(self.tab_venta, width=500, bootstyle="secondary")
+        # Lado derecho de Venta Directa: Carrito
+        right_v = ttk.Frame(self.tab_venta, width=350, bootstyle="secondary")
         right_v.pack(side='right', fill='y')
         right_v.pack_propagate(False)
         
-        ttk.Label(right_v, text='📋 ORDEN ACTUAL', font=(None, 14, 'bold'), bootstyle="inverse-secondary", padding=10).pack(fill='x')
-        
-        # Carrito estilo Excel con Treeview editable
-        cart_frame = ttk.Frame(right_v, padding=5)
-        cart_frame.pack(fill='both', expand=True, padx=5)
-        
-        cols = ('Producto', 'Cant', 'Precio', 'Subtotal')
-        self.cart_tree = ttk.Treeview(cart_frame, columns=cols, show='headings', height=8)
-        for col in cols:
-            self.cart_tree.heading(col, text=col)
-            self.cart_tree.column(col, anchor='center', width=80)
-        
-        self.cart_tree.column('Producto', width=180, anchor='w')
-        self.cart_tree.column('Cant', width=60, anchor='center')
-        self.cart_tree.pack(fill='both', expand=True)
-        
-        # Vincular doble clic para edición tipo Excel en la cantidad
-        self.cart_tree.bind("<Double-1>", self.on_cart_double_click)
-        
-        # Scrollbar para el carrito
-        cart_scroll = ttk.Scrollbar(cart_frame, orient='vertical', command=self.cart_tree.yview)
-        self.cart_tree.configure(yscrollcommand=cart_scroll.set)
-        cart_scroll.pack(side='right', fill='y')
-        
-        # Marco para controles de cantidad
-        qty_frame = ttk.Frame(right_v, padding=5)
-        qty_frame.pack(fill='x', padx=5)
-        
-        ttk.Label(qty_frame, text="Cantidad:").pack(side='left', padx=5)
-        self.qty_var = tk.StringVar(value="1")
-        self.qty_entry = ttk.Entry(qty_frame, textvariable=self.qty_var, width=5, font=(None, 14, 'bold'))
-        self.qty_entry.pack(side='left', padx=5)
-        
-        def qty_increase():
-            try:
-                val = int(self.qty_var.get()) + 1
-                self.qty_var.set(str(val))
-            except: self.qty_var.set("1")
-        def qty_decrease():
-            try:
-                val = int(self.qty_var.get()) - 1
-                if val < 1: val = 1
-                self.qty_var.set(str(val))
-            except: self.qty_var.set("1")
-        
-        ttk.Button(qty_frame, text='+', command=qty_increase, width=3, bootstyle="success-outline").pack(side='left', padx=2)
-        ttk.Button(qty_frame, text='-', command=qty_decrease, width=3, bootstyle="danger-outline").pack(side='left', padx=2)
-        
-        self.total_label = ttk.Label(right_v, text='Total: $0.00', font=(None, 18, 'bold'), bootstyle="inverse-secondary", padding=10)
+        ttk.Label(right_v, text='ORDEN ACTUAL', font=(None, 12, 'bold'), bootstyle="inverse-secondary", padding=10).pack(fill='x')
+        self.cart_list = tk.Listbox(right_v, bg=PANEL, fg=FG, font=(None, 11), bd=0, highlightthickness=0, selectbackground=ACCENT)
+        self.cart_list.pack(fill='both', expand=True, padx=10, pady=10)
+        self.total_label = ttk.Label(right_v, text='Total: $0.00', font=(None, 14, 'bold'), bootstyle="inverse-secondary", padding=10)
         self.total_label.pack(fill='x')
 
-        # Selector de canal en Caja (SOLO Para llevar - el local se maneja por mesero)
+        # Selector de canal en Caja (Para llevar o Consumo Local)
         chan_frame = ttk.Frame(right_v, bootstyle="secondary", padding=5)
         chan_frame.pack(fill='x')
         ttk.Label(chan_frame, text="Tipo de Pedido:", bootstyle="inverse-secondary").pack(side='left', padx=5)
-        self.order_channel = tk.StringVar(value="LLEVAR") # Por defecto Para Llevar
-        ttk.Radiobutton(chan_frame, text="🛍️ Llevar", variable=self.order_channel, value="LLEVAR", bootstyle="success-toolbutton").pack(side='left', padx=10)
+        self.order_channel = tk.StringVar(value="CAJA") # Por defecto Caja
+        ttk.Radiobutton(chan_frame, text="Llevar", variable=self.order_channel, value="LLEVAR", bootstyle="info-toolbutton").pack(side='left', padx=2)
+        ttk.Radiobutton(chan_frame, text="Local", variable=self.order_channel, value="CAJA", bootstyle="info-toolbutton").pack(side='left', padx=2)
 
-        # Botones de acción
-        btn_frame = ttk.Frame(right_v, padding=5)
-        btn_frame.pack(fill='x', padx=5, pady=5)
-        
-        ttk.Button(btn_frame, text='❌ QUITAR', command=self.remove_selected_cart, bootstyle="danger", cursor="hand2", padding=8).pack(side='left', padx=2, expand=True, fill='x')
-        ttk.Button(btn_frame, text='🗑️ LIMPIAR', command=self.clear_cart, bootstyle="secondary", cursor="hand2", padding=8).pack(side='left', padx=2, expand=True, fill='x')
-        
-        ttk.Button(right_v, text='✅ CONFIRMAR PEDIDO', command=self.process_order, bootstyle="success", cursor="hand2", padding=15).pack(fill='x', padx=10, pady=10)
+        ttk.Button(right_v, text='Quitar Item', command=self.remove_selected, bootstyle="danger", cursor="hand2").pack(fill='x', padx=10, pady=5)
+        ttk.Button(right_v, text='CONFIRMAR PEDIDO', command=self.process_order, bootstyle="success", cursor="hand2", padding=10).pack(fill='x', padx=10, pady=10)
 
         # Pestaña 2: Cobrar Mesas
         self.tab_cobros = ttk.Frame(self.pos_notebook, padding=10)
@@ -963,36 +609,36 @@ class POSFrame(tk.Canvas):
         ttk.Button(left_c, text='Actualizar Lista', command=self.refresh_unpaid_orders, bootstyle="info-outline").pack(pady=10)
         
         # Lado derecho: Detalles y Cobro (Más ancho para el teclado y detalle)
-        right_c = ttk.Frame(self.tab_cobros, width=750, bootstyle="secondary")
+        right_c = ttk.Frame(self.tab_cobros, width=650, bootstyle="secondary")
         right_c.pack(side='right', fill='y')
         right_c.pack_propagate(False)
         
-        ttk.Label(right_c, text='DETALLE DE CUENTA', font=(None, 16, 'bold'), bootstyle="inverse-secondary", padding=5).pack(fill='x')
-        # Detalle más compacto verticalmente
-        self.detail_text = tk.Text(right_c, bg=PANEL, fg=FG, font=(None, 14), height=5)
-        self.detail_text.pack(fill='x', padx=10, pady=2)
+        ttk.Label(right_c, text='DETALLE DE CUENTA', font=(None, 14, 'bold'), bootstyle="inverse-secondary", padding=10).pack(fill='x')
+        # Detalle más grande y ancho
+        self.detail_text = tk.Text(right_c, bg=PANEL, fg=FG, font=(None, 14), height=8)
+        self.detail_text.pack(fill='x', padx=10, pady=5)
         self.detail_text.config(state='disabled')
         
-        self.total_cobro_label = ttk.Label(right_c, text='Total a Cobrar: $0.00', font=(None, 24, 'bold'), bootstyle="inverse-secondary", padding=5)
+        self.total_cobro_label = ttk.Label(right_c, text='Total a Cobrar: $0.00', font=(None, 24, 'bold'), bootstyle="inverse-secondary", padding=10)
         self.total_cobro_label.pack(fill='x')
 
         # Botón para Agregar más productos a la mesa seleccionada
         ttk.Button(right_c, text='✚ AGREGAR PRODUCTOS A ESTA MESA', 
-                  command=self.add_more_to_table, bootstyle="warning", cursor="hand2", padding=8).pack(fill='x', padx=10, pady=2)
+                  command=self.add_more_to_table, bootstyle="warning", cursor="hand2", padding=10).pack(fill='x', padx=10, pady=5)
 
         # --- Teclado Numérico y Métodos de Pago ---
-        pay_frame = ttk.Frame(right_c, bootstyle="secondary", padding=5)
+        pay_frame = ttk.Frame(right_c, bootstyle="secondary", padding=10)
         pay_frame.pack(fill='both', expand=True)
 
         # Entrada de "Paga con"
         ttk.Label(pay_frame, text="Paga con $:", font=(None, 12), bootstyle="inverse-secondary").grid(row=0, column=0, columnspan=2, sticky='w')
         self.pay_amount_var = tk.StringVar(value="0.00")
-        self.pay_entry = ttk.Entry(pay_frame, textvariable=self.pay_amount_var, font=(None, 20, 'bold'), justify='right')
+        self.pay_entry = ttk.Entry(pay_frame, textvariable=self.pay_amount_var, font=(None, 18, 'bold'), justify='right')
         self.pay_entry.grid(row=1, column=0, columnspan=3, sticky='ew', pady=5)
 
-        # Teclado Numérico (Más grande)
+        # Teclado Numérico
         numpad = ttk.Frame(pay_frame, bootstyle="secondary")
-        numpad.grid(row=2, column=0, rowspan=4, columnspan=2, pady=5)
+        numpad.grid(row=2, column=0, rowspan=4, columnspan=2, pady=10)
 
         buttons = [
             '7', '8', '9',
@@ -1012,41 +658,38 @@ class POSFrame(tk.Canvas):
                 else: self.pay_amount_var.set(curr + key)
 
         for i, b in enumerate(buttons):
-            btn = ttk.Button(numpad, text=b, width=5, style="Light.Large.TButton", 
-                            command=lambda x=b: press_key(x), padding=12)
+            btn = ttk.Button(numpad, text=b, width=5, bootstyle="light", 
+                            command=lambda x=b: press_key(x))
             btn.grid(row=i//3, column=i%3, padx=2, pady=2, sticky='nsew')
-            btn.configure(cursor="hand2")
 
-        # Métodos de Pago con Imágenes (Convertidos a botones funcionales)
+        # Métodos de Pago con Imágenes
         methods_frame = ttk.Frame(pay_frame, bootstyle="secondary")
-        methods_frame.grid(row=2, column=2, rowspan=4, padx=(10, 0), sticky='nsew')
+        methods_frame.grid(row=2, column=2, rowspan=4, padx=(10, 0), sticky='n')
 
         self.payment_method = tk.StringVar(value="EFECTIVO")
         
         methods = [
-            ('EFECTIVO', 'efectivo.jpeg', 'success'),
-            ('YAPPY', 'yappy.png', 'info'),
-            ('TARJETA', 'visa.png', 'primary')
+            ('EFECTIVO', 'efectivo.jpeg'),
+            ('YAPPY', 'yappy.png'),
+            ('TARJETA', 'visa.png')
         ]
 
-        ttk.Label(methods_frame, text="MÉTODOS DE PAGO", font=(None, 11, 'bold'), bootstyle="inverse-secondary").pack(pady=(0, 5))
-
-        for i, (name, img_file, style) in enumerate(methods):
-            m_btn_container = ttk.Frame(methods_frame, bootstyle="secondary")
-            m_btn_container.pack(fill='x', pady=2)
+        for i, (name, img_file) in enumerate(methods):
+            m_btn = ttk.Frame(methods_frame, bootstyle="secondary", cursor="hand2")
+            m_btn.pack(fill='x', pady=2)
             
-            img = load_image(os.path.join('Imagenes', img_file), size=(45, 45))
+            img = load_image(os.path.join('Imagenes', img_file), size=(40, 40))
+            if img:
+                lbl_img = ttk.Label(m_btn, image=img, bootstyle="inverse-secondary")
+                lbl_img.image = img
+                lbl_img.pack(side='left', padx=5)
             
-            # Botón de pago directo
-            btn_pay = ttk.Button(m_btn_container, text=f"{name}", 
-                                image=img, compound='left',
-                                command=lambda n=name: self.pay_with_method(n), 
-                                bootstyle=f"{style}", cursor="hand2", padding=10)
-            btn_pay.image = img
-            btn_pay.pack(fill='x', expand=True)
+            # Usar Radiobutton estilizado como botón
+            rb = ttk.Radiobutton(m_btn, text=name, variable=self.payment_method, value=name, bootstyle="toolbutton")
+            rb.pack(side='left', fill='x', expand=True)
 
         # Cambio
-        self.change_label = ttk.Label(right_c, text='Cambio: $0.00', font=(None, 18, 'bold'), bootstyle="inverse-secondary", padding=5)
+        self.change_label = ttk.Label(right_c, text='Cambio: $0.00', font=(None, 16), bootstyle="inverse-secondary", padding=5)
         self.change_label.pack(fill='x')
         
         def update_change(*args):
@@ -1059,28 +702,19 @@ class POSFrame(tk.Canvas):
         
         self.pay_amount_var.trace_add("write", update_change)
 
+        ttk.Button(right_c, text='PROCESAR PAGO', command=self.pay_order, bootstyle="success", cursor="hand2", padding=15).pack(fill='x', padx=10, pady=10)
+        
         self.unpaid_tree.bind('<<TreeviewSelect>>', self.on_unpaid_select)
         self.refresh_unpaid_orders()
 
-    def pay_with_method(self, method):
-        """Asigna el método de pago y procesa la transacción inmediatamente."""
-        self.payment_method.set(method)
-        self.pay_order()
-
     def refresh_unpaid_orders(self):
-        """Consulta pedidos de meseros y de caja (para llevar) que aún no han sido pagados."""
-        # Limpiar tabla actual
-        for r in self.unpaid_tree.get_children(): 
-            self.unpaid_tree.delete(r)
+        """Consulta pedidos de meseros que aún no han sido pagados."""
+        for r in self.unpaid_tree.get_children(): self.unpaid_tree.delete(r)
         
-        # Incluimos 'LLEVAR' en la consulta para que el cajero pueda cobrarlos
-        query = "SELECT id, numero, mesa, total, created_at FROM pedidos WHERE pagado = 0 AND canal IN ('MESERO', 'LLEVAR') ORDER BY created_at DESC"
+        query = "SELECT id, numero, mesa, total, created_at FROM pedidos WHERE pagado = 0 AND canal = 'MESERO' ORDER BY created_at DESC"
         rows = self.db.fetch_all(query)
         for r in rows:
-            # Si mesa es None (pedidos para llevar), mostrar 'PARA LLEVAR'
-            values = list(r)
-            if values[2] is None: values[2] = 'PARA LLEVAR'
-            self.unpaid_tree.insert('', 'end', values=values)
+            self.unpaid_tree.insert('', 'end', values=r)
 
     def on_unpaid_select(self, event):
         """Muestra el detalle del pedido seleccionado."""
@@ -1103,52 +737,8 @@ class POSFrame(tk.Canvas):
             self.total_cobro_label.config(text=f"Total a Cobrar: ${order[1]:.2f}")
             self.pay_amount_var.set(f"{order[1]:.2f}")
 
-    def generate_invoice(self, order_id, paid_amount, change):
-        """Genera el texto de una factura estilo ticket con el formato Pik'ta Grill."""
-        order = self.db.fetch_one("SELECT numero, items, total, created_at, metodo_pago, mesa FROM pedidos WHERE id = ?", (order_id,))
-        if not order: return ""
-
-        numero, items_json, total, fecha, metodo, mesa = order
-        items = json.loads(items_json) if items_json else []
-        fecha_fmt = datetime.fromisoformat(fecha).strftime('%d/%m/%Y %H:%M:%S')
-        usuario = self.user.get('nombre_completo') if self.user else "Davis" # Default to Davis if no user
-        mesa_display = mesa if mesa else 'PARA LLEVAR'
-
-        # Formato exacto según la imagen proporcionada
-        factura =  "    *** PIK'TA GRILL ***\n"
-        factura += "    DONDE SI SABEMOS DE HAMBURGUESAS\n"
-        factura += "    ------------------------------------\n"
-        factura += f"    FACTURA: {numero}\n"
-        factura += f"    FECHA:   {fecha_fmt}\n"
-        factura += f"    MESA:    {mesa_display}\n"
-        factura += f"    CAJERO:  {usuario}\n"
-        factura += "    ------------------------------------\n"
-        factura += f"    {'CANT':<5} {'DESCRIPCIÓN':<20} {'SUBT':>8}\n"
-        factura += "    ------------------------------------\n"
-
-        for it in items:
-            nombre = it.get('nombre', 'N/A')[:20]
-            precio = it.get('precio', 0)
-            qty = it.get('qty', 1)
-            subt = precio * qty
-            factura += f"    {qty:<5} {nombre:<20} {subt:>8.2f}\n"
-
-        factura += "    ------------------------------------\n"
-        factura += f"    TOTAL:                    $ {total:>8.2f}\n"
-        factura += f"    RECIBIDO:                 $ {paid_amount:>8.2f}\n"
-        factura += f"    CAMBIO:                   $ {change:>8.2f}\n"
-        factura += "    ------------------------------------\n"
-        factura += f"    MÉTODO DE PAGO: {metodo.upper() if metodo else 'NO ESPECIFICADO'}\n"
-        factura += "    ------------------------------------\n"
-        factura += "         ¡GRACIAS POR SU VISITA!\n"
-        factura += "              REGRESE PRONTO\n"
-        factura += "    " + "*" * 36 + "\n"
-        factura += "\n\n\n" # Líneas extra para el corte
-
-        return factura
-
     def pay_order(self):
-        """Registra el pago del pedido seleccionado y genera la factura."""
+        """Registra el pago del pedido seleccionado."""
         sel = self.unpaid_tree.selection()
         if not sel:
             messagebox.showwarning('Aviso', 'Seleccione un pedido para cobrar')
@@ -1162,204 +752,23 @@ class POSFrame(tk.Canvas):
         order_id = item['values'][0]
         method = self.payment_method.get()
         
-        try:
-            total_str = self.total_cobro_label.cget("text").split("$")[1]
-            total = float(total_str)
-            paid_amount = float(self.pay_amount_var.get())
-            
-            if paid_amount < total:
-                messagebox.showerror("Error", "El monto pagado es menor al total.")
-                return
-                
-            change = paid_amount - total
-            
-            if messagebox.askyesno('Confirmar Pago', f'¿Confirmar el pago de ${total:.2f} con {method}?\nCambio: ${change:.2f}'):
-                # Generar Factura PRIMERO para guardarla en la BD
-                factura_text = self.generate_invoice(order_id, paid_amount, change)
-                
-                # Actualizar el pedido como pagado
-                self.db.execute('UPDATE pedidos SET pagado = 1, sesion_id = ?, metodo_pago = ?, factura_text = ? WHERE id = ?', 
-                                (self.session_id, method, factura_text, int(order_id)))
-                
-                # Forzar limpieza de selección para evitar conflictos
-                self.unpaid_tree.selection_remove(self.unpaid_tree.selection())
-                
-                messagebox.showinfo('Éxito', f'Pago procesado correctamente.\nCambio: ${change:.2f}')
-                
-                # Mostrar factura y opción de imprimir
-                self.show_invoice_popup(factura_text)
-                
-                # Refrescar lista y UI
+        if messagebox.askyesno('Confirmar Pago', f'¿Confirmar el pago de ${self.total_cobro_label.cget("text").split("$")[1]} con {method}?'):
+            try:
+                self.db.execute('UPDATE pedidos SET pagado = 1, sesion_id = ?, metodo_pago = ? WHERE id = ?', 
+                                (self.session_id, method, order_id))
+                messagebox.showinfo('Éxito', 'Pago procesado correctamente')
                 self.refresh_unpaid_orders()
-                self.update() # Forzar actualización de UI
                 self.detail_text.config(state='normal')
                 self.detail_text.delete('1.0', 'end')
                 self.detail_text.config(state='disabled')
                 self.total_cobro_label.config(text="Total a Cobrar: $0.00")
                 self.pay_amount_var.set("0.00")
-                self.cart.clear()
-                self.update_cart_display()
-                
-        except ValueError:
-            messagebox.showerror("Error", "Ingrese un monto válido.")
-        except Exception as e:
-            logging.error(f"Error al procesar pago: {e}")
-            messagebox.showerror('Error', 'No se pudo procesar el pago')
-
-    def show_invoice_popup(self, text, title="FACTURA PIK'TA"):
-        """Muestra la factura o reporte en una ventana emergente con opción de impresión."""
-        top = tk.Toplevel(self)
-        top.title(title)
-        top.geometry("600x650")
-        
-        # Logo en la factura popup
-        logo_path = os.path.join('Imagenes', 'pikta2.png')
-        if os.path.exists(logo_path):
-            img = load_image(logo_path, size=(100, 100))
-            if img:
-                lbl_logo = ttk.Label(top, image=img)
-                lbl_logo.image = img
-                lbl_logo.pack(pady=10)
-
-        t = tk.Text(top, height=25, width=40, font=("Courier", 10))
-        t.insert('1.0', text)
-        t.config(state='disabled')
-        t.pack(padx=10, pady=10)
-        
-        def print_invoice():
-            logo_path = os.path.join('Imagenes', 'pikta2.png')
-            
-            # Usar carpeta temporal para la impresión
-            temp_dir = os.path.join(os.environ.get('TEMP', 'C:\\temp'), 'PiktaInvoices')
-            if not os.path.exists(temp_dir):
-                os.makedirs(temp_dir)
-            
-            # Detectar impresora automáticamente
-            printer_name = find_pos_printer()
-            
-            # 1. Intentar abrir el cajón de dinero (ESC/POS command)
-            if WIN32_PRINT_AVAILABLE and printer_name:
-                try:
-                    hPrinter = win32print.OpenPrinter(printer_name)
-                    try:
-                        # Comando ESC/POS para abrir cajón: ESC p m t1 t2
-                        # \x1b\x70\x00\x19\xfa es el estándar para cajones de 24V/12V
-                        raw_data = b'\x1b\x70\x00\x19\xfa'
-                        win32print.StartDocPrinter(hPrinter, 1, ("Cajon", None, "RAW"))
-                        win32print.StartPagePrinter(hPrinter)
-                        win32print.WritePrinter(hPrinter, raw_data)
-                        win32print.EndPagePrinter(hPrinter)
-                        win32print.EndDocPrinter(hPrinter)
-                    finally:
-                        win32print.ClosePrinter(hPrinter)
-                except Exception as e:
-                    logging.error(f"Error al abrir cajón: {e}")
-
-            # 2. Generar y enviar factura
-            if PIL_AVAILABLE:
-                from PIL import Image, ImageDraw, ImageFont
-                
-                # Ticket estándar de 80mm
-                img_width = 380 
-                
-                # Calcular altura dinámica
-                lines = text.split('\n')
-                line_height = 22 # Un poco más de espacio entre líneas
-                header_space = 180 
-                footer_space = 40
-                img_height = header_space + (len(lines) * line_height) + footer_space
-                
-                img = Image.new('RGB', (img_width, img_height), 'white')
-                draw = ImageDraw.Draw(img)
-                
-                # Centrar Logo
-                try:
-                    if os.path.exists(logo_path):
-                        logo = Image.open(logo_path)
-                        logo = logo.resize((150, 150), Image.LANCZOS)
-                        logo_x = (img_width - 150) // 2
-                        img.paste(logo, (logo_x, 10))
-                except:
-                    pass
-                    
-                # Fuentes - Arial es estándar en Windows
-                try:
-                    font_bold = ImageFont.truetype("arialbd.ttf", 15)
-                    font_regular = ImageFont.truetype("arial.ttf", 12)
-                except:
-                    font_bold = ImageFont.load_default()
-                    font_regular = ImageFont.load_default()
-                
-                y = 170
-                for line in lines:
-                    line_clean = line.strip()
-                    if not line_clean: 
-                        y += line_height
-                        continue
-                        
-                    # Centrar líneas que empiezan con * o son cabeceras
-                    is_centered = line_clean.startswith('*') or 'PIK' in line or 'GRACIAS' in line or 'REGRESE' in line or 'GRILL' in line
-                    
-                    if is_centered:
-                        try:
-                            bbox = draw.textbbox((0, 0), line_clean, font=font_bold)
-                            w = bbox[2] - bbox[0]
-                            draw.text(((img_width - w) // 2, y), line_clean, fill='black', font=font_bold)
-                        except:
-                            draw.text((10, y), line, fill='black', font=font_bold)
-                    elif '====' in line or '----' in line:
-                        draw.text((10, y), line, fill='black', font=font_bold)
-                    else:
-                        draw.text((10, y), line, fill='black', font=font_regular)
-                    y += line_height
-                
-                # Guardar en la carpeta temporal
-                base_name = f"factura_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-                filename = os.path.join(temp_dir, base_name)
-                img.save(filename)
-                
-                def print_invoice():
-                    nonlocal printer_name
-                    if not printer_name:
-                        printer_name = find_pos_printer()
-                    if not printer_name:
-                        messagebox.showwarning("Sin impresora", "No se detectó impresora térmica.\nSe abrirá el archivo para impresión manual.")
-                        os.startfile(filename)
-                        return
-                    try:
-                        if WIN32_PRINT_AVAILABLE:
-                            try:
-                                win32api.ShellExecute(0, "printto", filename, f'"{printer_name}"', ".", 0)
-                                messagebox.showinfo("Impresión", f"Enviado a: {printer_name}\nCajón abierto.")
-                            except Exception as e:
-                                logging.warning(f"printto falló: {e}, intentando print directo")
-                                try:
-                                    win32api.ShellExecute(0, "print", filename, None, ".", 0)
-                                    messagebox.showinfo("Impresión", f"Enviado a: {printer_name}")
-                                except Exception as e2:
-                                    logging.error(f"Error al imprimir: {e2}")
-                                    os.startfile(filename)
-                                    messagebox.showinfo("Impresión", "No se pudo enviar a la impresora.\nSe abrió el archivo para impresión manual.")
-                        else:
-                            os.startfile(filename, "print")
-                            messagebox.showinfo("Impresión", "Enviado a impresora por defecto.")
-                    except Exception as e:
-                        logging.error(f"Error al imprimir: {e}")
-                        os.startfile(filename)
-                        messagebox.showinfo("Impresión", "Error de impresión.\nSe abrió el archivo para impresión manual.")
-            else:
-                # Fallback a texto plano
-                base_name = f"factura_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
-                filename = os.path.join(temp_dir, base_name)
-                with open(filename, "w", encoding="utf-8") as f:
-                    f.write(text)
-                os.startfile(filename)
-
-        ttk.Button(top, text="🖨 IMPRIMIR FACTURA", command=print_invoice, bootstyle="success").pack(pady=10)
-        ttk.Button(top, text="Cerrar", command=top.destroy, bootstyle="secondary").pack(pady=5)
+            except Exception as e:
+                logging.error(f"Error al procesar pago: {e}")
+                messagebox.showerror('Error', 'No se pudo procesar el pago')
 
     def add_more_to_table(self):
-        """Prepara el sistema para agregar más productos a un pedido de mesa ya existente."""
+        """Permite al cajero agregar más productos a un pedido de mesa ya existente."""
         sel = self.unpaid_tree.selection()
         if not sel:
             messagebox.showwarning('Aviso', 'Seleccione una mesa primero')
@@ -1369,57 +778,43 @@ class POSFrame(tk.Canvas):
         order_id = item['values'][0]
         mesa = item['values'][2]
         
-        # Guardar en memoria que estamos editando una mesa
-        self.editing_table_id = order_id
-        
         # Cambiar a la pestaña de Venta Directa
         self.pos_notebook.select(0)
         
-        # Mostrar aviso visual de que estamos editando
-        messagebox.showinfo("Modo Edición", f"ESTÁ EDITANDO LA {mesa}.\n\nAgregue los productos extras y presione 'CONFIRMAR PEDIDO' para guardarlos en la cuenta de la mesa.")
-
-    def update_existing_order(self):
-        """Actualiza un pedido existente con los nuevos productos del carrito."""
-        if not self.cart: return
+        # Guardar en memoria que estamos editando una mesa
+        self.editing_table_id = order_id
+        messagebox.showinfo("Modo Edición", f"Agregue los productos adicionales para la {mesa} y presione 'Confirmar Pedido'.")
         
-        try:
+        # Modificar temporalmente el comportamiento de process_order
+        self._original_process_order = self.process_order
+        def update_existing_order():
+            if not self.cart: return
+            
             # Obtener items actuales
-            res = self.db.fetch_one("SELECT items, mesa FROM pedidos WHERE id=?", (self.editing_table_id,))
-            if not res: return
+            res = self.db.fetch_one("SELECT items FROM pedidos WHERE id=?", (self.editing_table_id,))
+            current_items = json.loads(res[0]) if res else []
             
-            current_items = json.loads(res[0])
-            mesa = res[1]
-            
-            # Añadir nuevos respetando la cantidad
-            new_items_to_add = []
-            for p in self.cart:
-                qty = p.get('qty', 1)
-                for _ in range(qty):
-                    new_items_to_add.append({'id': p['id'], 'nombre': p['nombre'], 'precio': p['precio']})
-            
-            updated_items = current_items + new_items_to_add
+            # Añadir nuevos
+            new_items = [{'id': p[0], 'nombre': p[1], 'precio': p[2]} for p in self.cart]
+            updated_items = current_items + new_items
             new_total = sum(p['precio'] for p in updated_items)
             
-            self.db.execute("UPDATE pedidos SET items=?, subtotal=?, total=? WHERE id=?", 
-                            (json.dumps(updated_items, ensure_ascii=False), new_total, new_total, self.editing_table_id))
-            
-            # Registrar en auditoría
-            self.db.audit_log('pedidos', 'UPDATE', self.user.get('username'), f'Productos extras añadidos a {mesa}', new=new_items_to_add)
-            
-            messagebox.showinfo("Éxito", f"Productos añadidos correctamente a la {mesa}.")
-            
-            # Limpiar estado
-            self.cart.clear()
-            self.update_cart_display()
-            self.editing_table_id = None
-            
-            # Volver a pestaña de cobros
-            self.pos_notebook.select(1)
-            self.refresh_unpaid_orders()
-            
-        except Exception as e:
-            logging.error(f"Error al actualizar mesa: {e}")
-            messagebox.showerror("Error", "No se pudo actualizar la mesa.")
+            try:
+                self.db.execute("UPDATE pedidos SET items=?, subtotal=?, total=? WHERE id=?", 
+                                (json.dumps(updated_items, ensure_ascii=False), new_total, new_total, self.editing_table_id))
+                messagebox.showinfo("Éxito", f"Mesa {mesa} actualizada correctamente.")
+                self.cart.clear()
+                self.update_cart_display()
+                # Restaurar comportamiento y volver a pestaña de cobros
+                self.process_order = self._original_process_order
+                self.editing_table_id = None
+                self.pos_notebook.select(1)
+                self.refresh_unpaid_orders()
+            except Exception as e:
+                logging.error(f"Error al actualizar mesa: {e}")
+                messagebox.showerror("Error", "No se pudo actualizar la mesa.")
+
+        self.process_order = update_existing_order
 
     def render_products(self):
         """Genera dinámicamente las tarjetas de productos según la categoría."""
@@ -1450,6 +845,7 @@ class POSFrame(tk.Canvas):
             # Botón para añadir al carrito (más grande)
             btn = ttk.Button(card, text='Añadir', command=lambda pid=p: self.add_product(pid), bootstyle="info", cursor="hand2", takefocus=True, padding=8)
             btn.pack(fill='x')
+            btn.bind('<Return>', lambda e, pid=p: self.add_product(pid))
             product_btns.append(btn)
             
             # Navegación por flechas entre botones de productos
@@ -1471,127 +867,43 @@ class POSFrame(tk.Canvas):
             self.products_frame.columnconfigure(i, weight=1)
 
     def add_product(self, product):
-        """Agrega un producto a la lista del carrito con la cantidad seleccionada."""
-        try:
-            qty = int(self.qty_var.get()) if hasattr(self, 'qty_var') else 1
-        except:
-            qty = 1
-        if qty < 1: qty = 1
-        
-        # Verificar si el producto ya existe para incrementar cantidad
-        existing = None
-        for i, item in enumerate(self.cart):
-            if item['id'] == product[0]:
-                existing = i
-                break
-        
-        if existing is not None:
-            self.cart[existing]['qty'] += qty
-        else:
-            self.cart.append({'id': product[0], 'nombre': product[1], 'precio': product[2], 'qty': qty})
-        
+        """Agrega un producto a la lista del carrito."""
+        self.cart.append(product)
         self.update_cart_display()
-        self.qty_var.set("1") # Reset cantidad
 
-    def remove_selected_cart(self):
-        """Elimina el producto seleccionado del carrito."""
-        sel = self.cart_tree.selection()
+    def remove_selected(self):
+        """Elimina el producto seleccionado en la lista del carrito."""
+        sel = self.cart_list.curselection()
         if not sel: return
-        idx = int(sel[0].replace('I', '')) - 1
-        if 0 <= idx < len(self.cart):
-            del self.cart[idx]
+        idx = sel[0]
+        del self.cart[idx]
         self.update_cart_display()
-
-    def clear_cart(self):
-        """Limpia todo el carrito."""
-        self.cart.clear()
-        self.update_cart_display()
-
-    def on_cart_double_click(self, event):
-        """Habilita la edición manual de la cantidad al hacer doble clic (Estilo Excel)."""
-        region = self.cart_tree.identify_region(event.x, event.y)
-        if region != "cell": return
-
-        column = self.cart_tree.identify_column(event.x)
-        if column != '#2': return # Solo permitir edición en la columna 'Cant'
-
-        item_id = self.cart_tree.identify_row(event.y)
-        if not item_id: return
-
-        # Obtener dimensiones de la celda
-        x, y, width, height = self.cart_tree.bbox(item_id, column)
-
-        # Crear Entry flotante
-        entry = ttk.Entry(self.cart_tree)
-        entry.place(x=x, y=y, width=width, height=height)
-        
-        # Obtener cantidad actual (quitando la 'x')
-        curr_val = self.cart_tree.item(item_id, 'values')[1].replace('x', '')
-        entry.insert(0, curr_val)
-        entry.select_range(0, 'end')
-        entry.focus_set()
-
-        def save_edit(e=None):
-            try:
-                new_qty = int(entry.get())
-                if new_qty < 1: new_qty = 1
-                
-                # Actualizar el objeto en el carrito
-                idx = int(item_id) - 1
-                if 0 <= idx < len(self.cart):
-                    self.cart[idx]['qty'] = new_qty
-                    self.update_cart_display()
-            except ValueError:
-                pass # Ignorar si no es número
-            entry.destroy()
-
-        entry.bind("<Return>", save_edit)
-        entry.bind("<FocusOut>", lambda e: entry.destroy())
-        entry.bind("<Escape>", lambda e: entry.destroy())
 
     def update_cart_display(self):
-        """Refresca la visualización del carrito estilo Excel y calcula el total."""
-        # Limpiar treeview
-        for item in self.cart_tree.get_children():
-            self.cart_tree.delete(item)
-        
+        """Refresca la visualización de la lista del carrito y calcula el total."""
+        self.cart_list.delete(0, 'end')
         total = 0
-        for i, p in enumerate(self.cart):
-            qty = p.get('qty', 1)
-            precio = p.get('precio', 0)
-            subtotal = qty * precio
-            total += subtotal
-            self.cart_tree.insert('', 'end', iid=str(i+1), values=(p['nombre'], f"x{qty}", f"${precio:.2f}", f"${subtotal:.2f}"))
-        
+        for p in self.cart:
+            self.cart_list.insert('end', f"{p[1]:<20} ${p[2]:>6.2f}")
+            total += p[2]
         self.total_label.config(text=f'Total: ${total:.2f}')
 
     def process_order(self):
-        """Guarda un pedido nuevo o actualiza uno existente si estamos en modo edición."""
+        """Guarda el pedido en la base de datos y lo envía a cocina."""
         if not self.cart:
             messagebox.showinfo('Aviso', 'El carrito está vacío')
             return
-
-        # Si estamos en modo edición, usamos la lógica de actualización
-        if hasattr(self, 'editing_table_id') and self.editing_table_id:
-            self.update_existing_order()
-            return
         
-        # Preparar datos del pedido con cantidades
-        items_list = []
-        for p in self.cart:
-            qty = p.get('qty', 1)
-            for _ in range(qty): # Agregar tantas entradas como la cantidad
-                items_list.append({'id': p['id'], 'nombre': p['nombre'], 'precio': p['precio'], 'qty': qty})
-        
+        # Preparar datos del pedido
+        items_list = [{'id': p[0], 'nombre': p[1], 'precio': p[2]} for p in self.cart]
         items = json.dumps(items_list, ensure_ascii=False)
-        total = sum((p.get('precio', 0) * p.get('qty', 1)) for p in self.cart)
-        subtotal = total
+        subtotal = sum((p.get('precio') or 0) for p in items_list)
+        total = subtotal
         
         try:
             # Generar número de pedido único basado en fecha/hora
             canal = self.order_channel.get()
-            # Número más corto y profesional: PG + 8 últimos dígitos del timestamp
-            numero = f"PG-{datetime.now().strftime('%d%H%M%S')}"
+            numero = f"{canal}-{datetime.now().strftime('%Y%m%d%H%M%S')}"
             created_at = datetime.now().isoformat()
             usuario_id = self.user.get('id') if self.user else None
             sesion_id = self.session_id
@@ -1632,122 +944,50 @@ class POSFrame(tk.Canvas):
             messagebox.showerror('Error', 'No se pudo abrir la caja')
 
     def cerrar_caja(self):
-        """Finaliza la sesión de caja, calcula totales y muestra reporte detallado (estilo ticket)."""
+        """Finaliza la sesión de caja, calcula totales y muestra reporte."""
         if not self.session_id:
             messagebox.showwarning('Caja', 'No hay sesión de caja abierta')
             return
         
-        cierre_at = datetime.now().strftime('%d/%m/%Y %H:%M:%S')
-        usuario_id = self.user.get('id') if self.user else "N/A"
-        usuario_nombre = self.user.get('nombre_completo') if self.user else "Cajero Desconocido"
-        
-        # Obtener todas las ventas realizadas en esta sesión (CAJA y cobros de MESERO)
-        # Filtramos por sesion_id que es el que vincula las ventas a esta apertura de caja
-        query = '''
-            SELECT numero, total, created_at, metodo_pago, canal 
-            FROM pedidos 
-            WHERE sesion_id = ? AND pagado = 1
-            ORDER BY created_at ASC
-        '''
-        rows = self.db.fetch_all(query, (self.session_id,))
-        
-        sum_total = sum(float(r[1] or 0) for r in rows)
-        total_tickets = len(rows)
+        cierre_at = datetime.now().isoformat()
+        # Obtener todas las ventas realizadas en esta sesión
+        rows = self.db.fetch_all('SELECT id, numero, total, items FROM pedidos WHERE sesion_id = ? AND canal = ?', (self.session_id, 'CAJA'))
+        sum_total = sum(float(r[2] or 0) for r in rows)
 
         # Obtener monto inicial
         caja_row = self.db.fetch_one('SELECT inicial FROM caja_sesiones WHERE id = ?', (self.session_id,)) or (0.0,)
         inicial = float(caja_row[0] or 0)
         
-        # --- CONSTRUCCIÓN DEL REPORTE ESTILO TICKET ---
-        reporte =  "    ==========================================\n"
-        reporte += "    *        🍕 PIK'TA RESTAURANTE 🍕        *\n"
-        reporte += "    *       INFORME DE CIERRE DE CAJA        *\n"
-        reporte += "    ==========================================\n"
-        reporte += f"    Cierre:  {cierre_at}\n"
-        reporte += f"Cajero:  ID {usuario_id} - {usuario_nombre}\n"
-        reporte += f"Caja:    1\n"
-        reporte += f"Sesión:  {self.session_id}\n"
-        reporte += "------------------------------------------\n"
-        reporte += f"{'TICKET':<15} {'FECHA':<15} {'TOTAL':>10}\n"
-        reporte += "------------------------------------------\n"
-        
-        # Agrupar por método de pago para totales parciales (opcional pero útil)
-        por_metodo = {}
-        
-        for r in rows:
-            num, tot, fecha, metodo, canal = r
-            metodo = metodo or "EFECTIVO"
-            fecha_fmt = datetime.fromisoformat(fecha).strftime('%H:%M:%S') if fecha else "N/A"
-            reporte += f"{num[-8:]:<15} {fecha_fmt:<15} {tot:>10.2f}\n"
-            por_metodo[metodo] = por_metodo.get(metodo, 0) + float(tot)
-
-        reporte += "------------------------------------------\n"
-        for met, val in por_metodo.items():
-            reporte += f"Total {met:<15} {val:>20.2f}\n"
-            
-        reporte += "==========================================\n"
-        reporte += f"Monto Inicial:             {inicial:>15.2f}\n"
-        reporte += f"Total Ventas Turno:        {sum_total:>15.2f}\n"
-        reporte += "------------------------------------------\n"
-        reporte += f"TOTAL EN CAJA:             {sum_total + inicial:>15.2f}\n"
-        reporte += "==========================================\n"
-        reporte += f"Nº Total de Tickets:       {total_tickets:>15}\n"
-        reporte += "******************************************\n"
-        reporte += "      SISTEMA POS PIK'TA - 2026       \n"
-        reporte += "******************************************\n"
-
         try:
-            # Actualizar estado de la sesión a CERRADO y guardar reporte
-            self.db.execute('UPDATE caja_sesiones SET estado = ?, cierre_total = ?, cierre_at = ?, reporte_texto = ? WHERE id = ?', 
-                            ('CERRADO', sum_total, datetime.now().isoformat(), reporte, self.session_id))
-            
-            # --- IMPRESIÓN AUTOMÁTICA DEL CIERRE ---
-            temp_dir = os.path.join(os.environ.get('TEMP', 'C:\\temp'), 'PiktaInvoices')
-            if not os.path.exists(temp_dir): os.makedirs(temp_dir)
-            
-            base_name = f"cierre_automatico_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
-            filename = os.path.join(temp_dir, base_name)
-            with open(filename, "w", encoding="utf-8") as f:
-                f.write(reporte)
-            os.startfile(filename)
-            
-            messagebox.showinfo('Caja', 'Caja cerrada exitosamente. Reporte generado para impresión.')
+            # Actualizar estado de la sesión a CERRADO
+            self.db.execute('UPDATE caja_sesiones SET estado = ?, cierre_total = ?, cierre_at = ? WHERE id = ?', 
+                            ('CERRADO', sum_total, cierre_at, self.session_id))
+            messagebox.showinfo('Caja', 'Caja cerrada exitosamente')
         except Exception:
             logging.exception('Error al cerrar caja')
 
+        # Mostrar reporte de cierre en la interfaz
+        reporte = f"CIERRE DE CAJA ID: {self.session_id}\n"
+        reporte += f"Total Ventas: ${sum_total:.2f}\n"
+        reporte += f"Monto Inicial: ${inicial:.2f}\n"
+        reporte += f"Total en Caja: ${sum_total + inicial:.2f}"
+        
         self.show_report(reporte)
         self.session_id = None
+        # Eliminar llamada duplicada a show_report
 
     def show_report(self, text):
-        """Muestra una pantalla con el resumen del cierre de caja y permite imprimir."""
+        """Muestra una pantalla con el resumen del cierre de caja."""
         for w in self.products_frame.winfo_children():
             w.destroy()
         frm = ttk.Frame(self.products_frame, padding=20)
         frm.pack(fill='both', expand=True)
-        
-        ttk.Label(frm, text="REPORTE DE CIERRE", font=(None, 14, 'bold')).pack(pady=5)
-        
-        t = tk.Text(frm, height=18, width=50, font=("Courier", 10))
+        ttk.Label(frm, text="REPORTE DE CIERRE", font=(None, 14, 'bold')).pack(pady=10)
+        t = tk.Text(frm, height=15, width=50)
         t.insert('1.0', text)
         t.config(state='disabled')
         t.pack(pady=10)
-        
-        btn_frame = ttk.Frame(frm)
-        btn_frame.pack(fill='x', pady=10)
-        
-        def print_report():
-            temp_dir = os.path.join(os.environ.get('TEMP', 'C:\\temp'), 'PiktaInvoices')
-            if not os.path.exists(temp_dir): os.makedirs(temp_dir)
-            
-            base_name = f"cierre_caja_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
-            filename = os.path.join(temp_dir, base_name)
-            with open(filename, "w", encoding="utf-8") as f:
-                f.write(text)
-            os.startfile(filename)
-            messagebox.showinfo("Impresión", "Reporte enviado a imprimir.")
-
-        ttk.Button(btn_frame, text='🖨 IMPRIMIR REPORTE', command=print_report, bootstyle="success").pack(side='left', padx=5, expand=True)
-        ttk.Button(btn_frame, text='Regresar al Menú', command=self.render_products, bootstyle="info").pack(side='left', padx=5, expand=True)
+        ttk.Button(frm, text='Regresar al Menú', command=self.render_products, bootstyle="info").pack(pady=10)
 
 
 class MeseroFrame(tk.Canvas):
@@ -1765,16 +1005,12 @@ class MeseroFrame(tk.Canvas):
         
         # Logo de Fondo en Mesero
         bg_logo_path = os.path.join('Imagenes', 'pikta2.png')
-        self.last_bg_w, self.last_bg_h = 0, 0
         if os.path.exists(bg_logo_path) and PIL_AVAILABLE:
             self.bg_raw = Image.open(bg_logo_path)
             def draw_mes_bg(e):
+                self.delete("bg")
                 cw, ch = e.width, e.height
                 if cw < 10 or ch < 10: return
-                if abs(cw - self.last_bg_w) < 20 and abs(ch - self.last_bg_h) < 20: return
-                
-                self.last_bg_w, self.last_bg_h = cw, ch
-                self.delete("bg")
                 img_res = self.bg_raw.resize((cw, ch), Image.LANCZOS)
                 self.bg_photo = ImageTk.PhotoImage(img_res)
                 self.create_image(cw//2, ch//2, image=self.bg_photo, tags="bg")
@@ -1805,7 +1041,7 @@ class MeseroFrame(tk.Canvas):
             lbl.pack(side='left', padx=10)
         
         ttk.Label(self.header, text='🍽️ MÓDULO DE MESERO', font=(None, 24, 'bold'), bootstyle="inverse-warning").pack(side='left', padx=10)
-        ttk.Button(self.header, text='Regresar', command=lambda: self.master.select(0), bootstyle="secondary-outline", cursor="hand2", padding=10, takefocus=True).pack(side='right', padx=5)
+        ttk.Button(self.header, text='Regresar', command=lambda: self.master.select(0), bootstyle="secondary-outline", cursor="hand2", padding=10).pack(side='right', padx=5)
 
         # --- Cuerpo ---
         # Lado izquierdo: Mesas y Productos
@@ -1873,7 +1109,7 @@ class MeseroFrame(tk.Canvas):
             ttk.Label(card, text=f"${p[2]:.2f}", font=(None, 16), bootstyle="warning").pack(pady=5)
             btn = ttk.Button(card, text='Añadir', command=lambda pid=p: self.add_product(pid), bootstyle="warning", cursor="hand2", padding=8, takefocus=True)
             btn.pack(fill='x')
-            # btn.bind('<Return>', lambda e, pid=p: self.add_product(pid)) # Redundante con global handler
+            btn.bind('<Return>', lambda e, pid=p: self.add_product(pid))
             product_btns.append(btn)
 
             # Navegación por flechas entre botones de productos
@@ -1920,8 +1156,7 @@ class MeseroFrame(tk.Canvas):
         mesa = self.selected_mesa.get()
         
         try:
-            # Número profesional: PG-M- + 8 dígitos del timestamp
-            numero = f"PG-M-{datetime.now().strftime('%d%H%M%S')}"
+            numero = f"MES-{datetime.now().strftime('%Y%m%d%H%M%S')}"
             created_at = datetime.now().isoformat()
             usuario_id = self.user.get('id') if self.user else None
             
@@ -1948,20 +1183,15 @@ class KDSFrame(tk.Canvas):
         self.db = db
         self.user = user
         self.last_order_count = 0
-        self.confirm_finish = set() # IDs de pedidos en modo confirmación de finalizar
         
         # Logo de Fondo en KDS
         bg_logo_path = os.path.join('Imagenes', 'pikta2.png')
-        self.last_bg_w, self.last_bg_h = 0, 0
         if os.path.exists(bg_logo_path) and PIL_AVAILABLE:
             self.bg_raw = Image.open(bg_logo_path)
             def draw_kds_bg(e):
+                self.delete("bg")
                 cw, ch = e.width, e.height
                 if cw < 10 or ch < 10: return
-                if abs(cw - self.last_bg_w) < 20 and abs(ch - self.last_bg_h) < 20: return
-                
-                self.last_bg_w, self.last_bg_h = cw, ch
-                self.delete("bg")
                 img_res = self.bg_raw.resize((cw, ch), Image.LANCZOS)
                 self.bg_photo = ImageTk.PhotoImage(img_res)
                 self.create_image(cw//2, ch//2, image=self.bg_photo, tags="bg")
@@ -1971,12 +1201,6 @@ class KDSFrame(tk.Canvas):
         # --- Contenedores para Secciones ---
         self.header = ttk.Frame(self, bootstyle="warning", padding=15)
         self.header_win = self.create_window(0, 0, window=self.header, anchor='nw', tags="header")
-        
-        # Guardar referencia al botón para el atajo de teclado
-        self.btn_back = ttk.Button(self.header, text='Regresar', command=lambda: self.master.select(0), bootstyle="secondary-outline", cursor="hand2", padding=10, takefocus=True)
-        self.btn_back.pack(side='right', padx=5)
-        
-        ttk.Button(self.header, text='Refrescar', command=self.refresh, bootstyle="light-outline", cursor="hand2", padding=10, takefocus=True).pack(side='right', padx=5)
         
         self.body = ttk.Frame(self, padding=10)
         self.body_win = self.create_window(0, 70, window=self.body, anchor='nw', tags="body")
@@ -1996,201 +1220,108 @@ class KDSFrame(tk.Canvas):
             lbl.pack(side='left', padx=10)
             
         ttk.Label(self.header, text='🍳 MONITOR DE COCINA (KDS)', font=(None, 24, 'bold'), bootstyle="inverse-warning").pack(side='left', padx=10)
+        ttk.Button(self.header, text='Regresar', command=lambda: self.master.select(0), bootstyle="secondary-outline", cursor="hand2", padding=10).pack(side='right', padx=5)
+        ttk.Button(self.header, text='Refrescar', command=self.refresh, bootstyle="light-outline", cursor="hand2", padding=10).pack(side='right', padx=5)
         
         # --- Instrucciones ---
-        instr = ttk.Label(self.header, text="TAB: Navegar / ENTER: Iniciar o Finalizar", font=(None, 12, 'italic'), bootstyle="inverse-warning")
-        instr.pack(side='left', padx=20)
+        instr = ttk.Label(self.body, text="ENTER: Iniciar Preparación / Marcar como Finalizado", font=(None, 10, 'italic'), bootstyle="secondary")
+        instr.pack(pady=2)
 
-        # --- Área de Pedidos Scrolleable ---
-        # Usamos un Canvas con un Frame interno para las tarjetas
-        self.kds_canvas = tk.Canvas(self.body, bg=BG, highlightthickness=0)
-        self.kds_scrollbar = ttk.Scrollbar(self.body, orient="vertical", command=self.kds_canvas.yview)
-        self.cards_container = ttk.Frame(self.kds_canvas, bootstyle="dark")
+        # --- Lista de Pedidos en el cuerpo ---
+        self.listbox = tk.Listbox(self.body, bg=PANEL, fg=FG, font=(None, 14), bd=0, highlightthickness=0, selectbackground=ACCENT, takefocus=True)
+        self.listbox.pack(fill='both', expand=True, pady=10)
+        self.listbox.bind('<Return>', lambda e: self.advance_order_state())
         
-        self.kds_canvas.create_window((0, 0), window=self.cards_container, anchor="nw", tags="inner_frame")
-        self.kds_canvas.configure(yscrollcommand=self.kds_scrollbar.set)
-        
-        self.kds_scrollbar.pack(side="right", fill="y")
-        self.kds_canvas.pack(side="left", fill="both", expand=True)
-        
-        def on_frame_configure(e):
-            self.kds_canvas.configure(scrollregion=self.kds_canvas.bbox("all"))
-            # Forzar el ancho del frame interno al del canvas
-            self.kds_canvas.itemconfig("inner_frame", width=self.kds_canvas.winfo_width())
-
-        self.cards_container.bind("<Configure>", on_frame_configure)
-        self.kds_canvas.bind("<Configure>", lambda e: self.kds_canvas.itemconfig("inner_frame", width=e.width))
-
+        footer = ttk.Frame(self.body)
+        footer.pack(fill='x', pady=10)
+        self.btn_action = ttk.Button(footer, text='AVANZAR ESTADO (ENTER)', command=self.advance_order_state, bootstyle="success", padding=20, cursor="hand2")
+        self.btn_action.pack(fill='x')
         self.refresh()
 
     def refresh(self):
-        """Consulta la base de datos y renderiza tarjetas para cada pedido activo (estilo WEB)."""
-        # Guardar qué ID tenía el foco antes de limpiar
-        focused_widget = self.focus_get()
-        
-        # Si el foco está en un botón del header, no lo movemos al refrescar
-        is_header_focused = False
-        if focused_widget and focused_widget.master == self.header:
-            is_header_focused = True
-            
-        last_focused_id = getattr(focused_widget, '_order_id', None) if focused_widget else None
-
-        # Limpiar tarjetas actuales
-        for widget in self.cards_container.winfo_children():
-            widget.destroy()
-
+        """Consulta la base de datos y actualiza la lista de pedidos activos."""
+        self.listbox.delete(0, 'end')
         # Traer pedidos que NO tengan estado 'LISTO'
-        rows = self.db.fetch_all("SELECT id, numero, items, estado, mesa, created_at FROM pedidos WHERE estado NOT IN ('LISTO', 'CANCELADO') ORDER BY id ASC LIMIT 50")
+        rows = self.db.fetch_all("SELECT id, numero, items, estado, mesa FROM pedidos WHERE estado NOT IN ('LISTO', 'CANCELADO') ORDER BY id DESC LIMIT 50")
         
         # Reproducir sonido si hay pedidos nuevos
         if len(rows) > self.last_order_count:
             play_sound_new_order()
         self.last_order_count = len(rows)
         
-        if not rows:
-            ttk.Label(self.cards_container, text="No hay pedidos activos en cocina.", font=(None, 16), bootstyle="inverse-dark").pack(pady=50)
-            return
-
-        # Grid de tarjetas (3 columnas)
-        cols = 3
-        first_btn = None
-        target_btn = None
-
-        for idx, r in enumerate(rows):
-            row, col = divmod(idx, cols)
-            pid, num, items_json, estado, mesa, fecha = r
-            
-            # Determinar color según estado (estilo web)
-            # RECIBIDO -> Azul (info) - "EN PROCESO" -> Naranja (warning) - LISTO -> Verde
-            if estado == 'RECIBIDO':
-                card_style = "info"
-                btn_text = "🚀 INICIAR PREPARACIÓN (15 min)"
-                btn_style = "warning"
-            elif estado == 'EN PROCESO':
-                card_style = "warning"
-                # Si está en modo confirmación, cambiar texto
-                if pid in self.confirm_finish:
-                    btn_text = "✅ FINALIZAR Y ENTREGAR"
-                    btn_style = "success"
-                else:
-                    btn_text = "👩‍🍳 EN PROCESO (CLICK AL TERMINAR)"
-                    btn_style = "warning"
-            else:
-                continue # No mostrar otros estados
-            
-            # Crear la tarjeta (Frame)
-            card = ttk.Frame(self.cards_container, bootstyle="secondary", padding=2)
-            card.grid(row=row, column=col, padx=10, pady=10, sticky='nsew')
-            
-            # Header de la tarjeta
-            header = ttk.Frame(card, bootstyle=card_style, padding=10)
-            header.pack(fill='x')
-            
-            ttk.Label(header, text=f"#{pid}", font=(None, 18, 'bold'), bootstyle=f"inverse-{card_style}").pack(side='left')
-            ttk.Label(header, text=f"MESA: {mesa if mesa else 'CAJA'}", font=(None, 12, 'bold'), bootstyle=f"inverse-{card_style}").pack(side='right')
-            
-            # Cuerpo de la tarjeta (Items)
-            body = ttk.Frame(card, bootstyle="light", padding=15)
-            body.pack(fill='both', expand=True)
-            
+        for r in rows:
             try:
-                items_list = json.loads(items_json) if items_json else []
-                for it in items_list:
-                    it_frame = ttk.Frame(body, bootstyle="light")
-                    it_frame.pack(fill='x', pady=2)
-                    ttk.Label(it_frame, text=f"• {it.get('nombre')}", font=(None, 13), bootstyle="inverse-light").pack(side='left')
-                    ttk.Label(it_frame, text=f"x{it.get('qty', 1)}", font=(None, 13, 'bold'), bootstyle="info").pack(side='right')
+                # Parsear el JSON de items para mostrar nombres legibles
+                items_obj = json.loads(r[2]) if r[2] else []
+                item_names = ', '.join([f"{it.get('qty', 1)}x {it.get('nombre')}" for it in items_obj])
             except:
-                ttk.Label(body, text=items_json, font=(None, 11), wraplength=200).pack()
+                item_names = r[2] or ""
             
-            # Footer con botón de acción (Focusable para TAB)
-            footer = ttk.Frame(card, bootstyle="light", padding=10)
-            footer.pack(fill='x')
+            mesa_info = f"[{r[4]}]" if r[4] else "[CAJA]"
+            # Formato visual mejorado para mostrar el estado actual
+            estado = r[3]
+            self.listbox.insert('end', f" #{r[0]:<5} | {mesa_info:<10} | {estado:<15} | {item_names}")
             
-            # El botón captura el foco TAB y ENTER (ya manejado globalmente por App._on_global_return)
-            btn = ttk.Button(footer, text=btn_text, bootstyle=btn_style, cursor="hand2", 
-                            command=lambda p=pid: self.advance_order_state_by_id(p))
-            btn.pack(fill='x', ipady=10)
-            btn._order_id = pid # Guardar ID para persistencia de foco
-            
-            # Forzar el foco si es el botón que buscamos
-            if pid == last_focused_id: target_btn = btn
-            if not first_btn: first_btn = btn
-            
-            # ELIMINADO: btn.bind('<Return>') para evitar doble ejecución con el manejador global
-            
-            # Efecto visual de foco para toda la tarjeta
-            def on_btn_focus(e, c=card):
-                c.configure(bootstyle="primary") 
-            
-            def on_btn_blur(e, c=card):
-                c.configure(bootstyle="secondary")
-            
-            btn.bind("<FocusIn>", on_btn_focus)
-            btn.bind("<FocusOut>", on_btn_blur)
-
-
-        # Configurar peso de columnas del grid
-        for i in range(cols):
-            self.cards_container.columnconfigure(i, weight=1)
-
-        # Restaurar foco de forma inteligente
-        if is_header_focused:
-            # Mantener foco en el header
-            if focused_widget: focused_widget.focus_set()
-        elif target_btn:
-            target_btn.focus_set()
-        elif first_btn:
-            # Si el pedido que tenía el foco ya no está (porque se completó), ir al primero
-            first_btn.focus_set()
-
-        # Configurar peso de columnas del grid
-        for i in range(cols):
-            self.cards_container.columnconfigure(i, weight=1)
-
-    def advance_order_state_by_id(self, pid):
-        """Avanza el estado de un pedido específico por su ID: RECIBIDO -> EN PROCESO -> LISTO."""
-        try:
-            # Obtener estado actual
-            with self.db.get_connection() as conn:
-                res = conn.execute("SELECT estado FROM pedidos WHERE id=?", (pid,)).fetchone()
-                if not res: return
-                current_state = res[0].upper()
-
-                if current_state == 'RECIBIDO':
-                    new_state = 'EN PROCESO'
-                    conn.execute('UPDATE pedidos SET estado=? WHERE id=?', (new_state, pid))
-                elif current_state == 'EN PROCESO':
-                    # Si no estaba en modo confirmación, activarlo
-                    if pid not in self.confirm_finish:
-                        self.confirm_finish.add(pid)
-                        conn.commit()
-                        self.refresh()
-                        return
-                    
-                    # Si ya estaba en modo confirmación, proceder a finalizar
-                    new_state = 'LISTO'
-                    conn.execute('UPDATE pedidos SET estado=? WHERE id=?', (new_state, pid))
-                    if pid in self.confirm_finish: self.confirm_finish.remove(pid)
-                    # El sonido se dispara aquí al finalizar
-                    play_sound_order_ready()
-                else:
-                    return 
-                conn.commit()
-            
-            # Forzar refresco visual total para actualizar colores y botones
-            self.refresh()
-        except Exception as e:
-            logging.error(f"Error en KDS advance_order_state_by_id: {str(e)}")
-            play_sound_error()
+            # Colorear según estado
+            idx = self.listbox.size() - 1
+            if estado == 'PREPARANDO':
+                self.listbox.itemconfig(idx, fg='#f0ad4e') # Naranja/Amarillo
+            elif estado == 'RECIBIDO':
+                self.listbox.itemconfig(idx, fg='#5bc0de') # Azul
 
     def advance_order_state(self):
-        """Mantenemos por compatibilidad, pero ahora usamos advance_order_state_by_id."""
-        pass
+        """Avanza el pedido por los estados: RECIBIDO -> PREPARANDO -> LISTO."""
+        try:
+            sel = self.listbox.curselection()
+            if not sel: 
+                # Si no hay selección pero hay elementos, seleccionar el primero
+                if self.listbox.size() > 0:
+                    self.listbox.selection_set(0)
+                    self.listbox.activate(0)
+                    sel = (0,)
+                else:
+                    return
+                
+            index = sel[0]
+            text = self.listbox.get(index)
+            
+            import re
+            match = re.search(r'#(\d+)', text)
+            if not match: return
+            pid = int(match.group(1))
+
+            # Obtener estado actual directamente de la base de datos
+            res = self.db.fetch_one("SELECT estado FROM pedidos WHERE id=?", (pid,))
+            if not res: return
+            current_state = res[0]
+
+            if current_state == 'RECIBIDO':
+                new_state = 'PREPARANDO'
+                self.db.execute('UPDATE pedidos SET estado=? WHERE id=?', (new_state, pid))
+            elif current_state == 'PREPARANDO':
+                new_state = 'LISTO'
+                self.db.execute('UPDATE pedidos SET estado=? WHERE id=?', (new_state, pid))
+                play_sound_order_ready() # Sonido de campanas
+            else:
+                return 
+            
+            # Actualizar la lista inmediatamente
+            self.refresh()
+            
+            # Mantener el foco y selección en la misma posición o la última disponible
+            if self.listbox.size() > 0:
+                new_idx = min(index, self.listbox.size() - 1)
+                self.listbox.selection_set(new_idx)
+                self.listbox.activate(new_idx)
+                self.listbox.focus_set()
+                
+        except Exception as e:
+            logging.error(f"Error en KDS advance_order_state: {str(e)}")
+            play_sound_error()
 
     def mark_ready(self):
-        """Mantenemos por compatibilidad."""
-        pass
+        """Mantenemos por compatibilidad con el manejador global de ENTER."""
+        self.advance_order_state()
 
 class WhatsAppFrame(tk.Canvas):
     """
@@ -2198,10 +1329,8 @@ class WhatsAppFrame(tk.Canvas):
     Se abre automáticamente en una ventana profesional integrada.
     """
     def __init__(self, parent, db: DatabaseManager, *args, **kwargs):
-        user = kwargs.pop('user', None)
         super().__init__(parent, bg=BG, highlightthickness=0, *args, **kwargs)
         self.db = db
-        self.user = user
         self.wa_process = None
         
         # Logo de Fondo en WhatsApp
@@ -2298,10 +1427,8 @@ class AdminFrame(tk.Canvas):
     Permite gestionar el inventario, usuarios y seguridad.
     """
     def __init__(self, parent, db: DatabaseManager, *args, **kwargs):
-        user = kwargs.pop('user', None)
         super().__init__(parent, bg=BG, highlightthickness=0, *args, **kwargs)
         self.db = db
-        self.user = user
         
         # Logo de Fondo en Admin
         bg_logo_path = os.path.join('Imagenes', 'pikta2.png')
@@ -2311,9 +1438,7 @@ class AdminFrame(tk.Canvas):
             def draw_adm_bg(e):
                 cw, ch = e.width, e.height
                 if cw < 10 or ch < 10: return
-                # Solo redibujar si el cambio es significativo (>20px) para evitar lentitud
-                if abs(cw - self.last_bg_w) < 20 and abs(ch - self.last_bg_h) < 20: return
-                
+                if cw == self.last_bg_w and ch == self.last_bg_h: return
                 self.last_bg_w, self.last_bg_h = cw, ch
                 self.delete("bg")
                 img_res = self.bg_raw.resize((cw, ch), Image.LANCZOS)
@@ -2346,12 +1471,12 @@ class AdminFrame(tk.Canvas):
         self.title_lbl = ttk.Label(self.header, text='📊 PANEL DE ADMINISTRACIÓN', font=(None, 24, 'bold'), bootstyle="inverse-success")
         self.title_lbl.pack(side='left', padx=10)
         
-        self.btn_back_main = ttk.Button(self.header, text='Regresar', command=lambda: self.master.select(0), bootstyle="light-outline", cursor="hand2", padding=10, takefocus=True)
+        self.btn_back_main = ttk.Button(self.header, text='Regresar', command=lambda: self.master.select(0), bootstyle="light-outline", cursor="hand2", padding=10)
         self.btn_back_main.pack(side='right', padx=5)
-        # self.btn_back_main.bind('<Return>', lambda e: self.master.select(0)) # Redundante
+        self.btn_back_main.bind('<Return>', lambda e: self.master.select(0))
         
-        self.btn_back_admin = ttk.Button(self.header, text='Volver al Admin', command=self.show_admin_menu, bootstyle="light-outline", cursor="hand2", padding=10, takefocus=True)
-        # self.btn_back_admin.bind('<Return>', lambda e: self.show_admin_menu()) # Redundante
+        self.btn_back_admin = ttk.Button(self.header, text='Volver al Admin', command=self.show_admin_menu, bootstyle="light-outline", cursor="hand2", padding=10)
+        self.btn_back_admin.bind('<Return>', lambda e: self.show_admin_menu())
 
         # --- Contenedor Principal con Notebook Oculto en el cuerpo ---
         self.notebook = ttk.Notebook(self.body, style='Hidden.TNotebook')
@@ -2365,314 +1490,125 @@ class AdminFrame(tk.Canvas):
         # 2. Pestaña de Inventario
         self.inv_frame = ttk.Frame(self.notebook, padding=20)
         self.notebook.add(self.inv_frame, text='Inventario')
+        self.setup_inventory()
 
         # 3. Pestaña de Usuarios
         self.users_frame = ttk.Frame(self.notebook, padding=20)
         self.notebook.add(self.users_frame, text='Usuarios')
+        self.setup_users()
 
         # 4. Pestaña de Seguridad
         self.security_frame = ttk.Frame(self.notebook, padding=20)
         self.notebook.add(self.security_frame, text='Seguridad')
+        self.setup_security()
 
         # 5. Pestaña de Menú / Productos
         self.products_frame = ttk.Frame(self.notebook, padding=20)
         self.notebook.add(self.products_frame, text='Menú / Productos')
-
-        # 6. Pestaña de Historial de Cierres
-        self.cierre_history_frame = ttk.Frame(self.notebook, padding=20)
-        self.notebook.add(self.cierre_history_frame, text='Historial de Cierres')
+        self.setup_menu()
 
         self.show_admin_menu() # Mostrar el menú de cuadritos al inicio
 
     def setup_admin_menu(self):
-        """Crea el dashboard interno de administración con un diseño profesional, limpio y con scroll."""
-        for w in self.menu_frame.winfo_children():
-            w.destroy()
-
-        # --- CONTENEDOR CON SCROLL ---
-        canvas = tk.Canvas(self.menu_frame, bg=BG, highlightthickness=0)
-        scrollbar = ttk.Scrollbar(self.menu_frame, orient="vertical", command=canvas.yview)
-        scrollable_frame = ttk.Frame(canvas)
-
-        scrollable_frame.bind(
-            "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
-        )
-
-        canvas_window = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-
-        def configure_canvas(event):
-            # Hacer que el frame interno tenga el mismo ancho que el canvas
-            canvas.itemconfig(canvas_window, width=event.width)
-        canvas.bind("<Configure>", configure_canvas)
-
-        canvas.configure(yscrollcommand=scrollbar.set)
-
-        scrollbar.pack(side="right", fill="y")
-        canvas.pack(side="left", fill="both", expand=True)
-
-        # --- CONTENIDO DEL DASHBOARD ---
-        main_container = ttk.Frame(scrollable_frame, padding=40)
-        main_container.pack(fill='both', expand=True)
-
-        # Título decorativo interno
-        ttk.Label(main_container, text="Panel de Gestión Administrativa", font=(None, 24, 'bold'), bootstyle="light").pack(pady=(0, 40), anchor='w')
-
-        # Grid para las tarjetas
-        cards_wrap = ttk.Frame(main_container)
-        cards_wrap.pack(fill='x', expand=True)
+        """Crea el dashboard interno de administración con cuadritos e imágenes."""
+        cards_wrap = ttk.Frame(self.menu_frame)
+        cards_wrap.pack(fill='both', expand=True)
 
         def make_admin_card(parent, img_name, title, desc, cmd, color="success"):
-            # Aumento de tamaño para una mejor apreciación (Dashboard Moderno)
-            card = ttk.Frame(parent, bootstyle="secondary", padding=2, cursor="hand2", takefocus=True, width=320, height=360)
+            # Reutilizamos el estilo de 'pop-out' del dashboard principal
+            card = ttk.Frame(parent, bootstyle="secondary", padding=2, cursor="hand2", takefocus=True, width=220, height=260)
             card.pack_propagate(False)
-
-            inner = ttk.Frame(card, padding=25)
+            
+            inner = ttk.Frame(card, padding=10) 
             inner.pack(fill='both', expand=True)
 
+            # Carga de imagen o emoji por defecto
             img = None
             if img_name:
                 path = os.path.join('Imagenes', img_name)
-                img = load_image(path, size=(140, 140)) # Imágenes más grandes
-
+                img = load_image(path, size=(90, 90))
+            
             if img:
                 lbl = ttk.Label(inner, image=img)
                 lbl.image = img
                 lbl.pack(pady=10)
             else:
+                # Si no hay imagen, usar un emoji genérico según el título
                 emoji = '📦'
                 if 'Usuarios' in title: emoji = '👥'
                 if 'Seguridad' in title: emoji = '🛡️'
-                ttk.Label(inner, text=emoji, font=(None, 70)).pack(pady=10)
+                ttk.Label(inner, text=emoji, font=(None, 45)).pack(pady=10)
 
-            ttk.Label(inner, text=title, font=(None, 22, 'bold'), wraplength=280, justify='center').pack(pady=10)
-            ttk.Label(inner, text=desc, wraplength=260, justify='center', font=(None, 12), bootstyle="secondary").pack(pady=5, fill='both', expand=True)
+            ttk.Label(inner, text=title, font=(None, 22, 'bold'), wraplength=200, justify='center').pack(pady=5)
+            ttk.Label(inner, text=desc, wraplength=180, justify='center', font=(None, 12)).pack(pady=5, fill='both', expand=True)
 
             def on_enter(e):
-                card.configure(bootstyle=color, padding=4)
+                card.configure(bootstyle=color, padding=5)
                 inner.configure(bootstyle="light")
             def on_leave(e):
                 card.configure(bootstyle="secondary", padding=2)
                 inner.configure(bootstyle="default")
 
-            for widget in (card, inner):
-                widget.bind("<Enter>", on_enter)
-                widget.bind("<Leave>", on_leave)
-                widget.bind("<Button-1>", lambda e: cmd())
-                widget.bind("<Return>", lambda e: cmd())
-            
+            card.bind("<Enter>", on_enter); card.bind("<Leave>", on_leave)
+            card.bind("<FocusIn>", lambda e: on_enter(None)); card.bind("<FocusOut>", lambda e: on_leave(None))
+            card.bind("<Button-1>", lambda e: cmd())
+            card.bind("<Return>", lambda e: cmd())
+            inner.bind("<Button-1>", lambda e: cmd())
+            inner.bind("<Return>", lambda e: cmd())
             return card
 
+        # Tarjetas del Admin con sus imágenes correspondientes
         admin_cards = []
-        role = (self.user.get('rol') or '').lower() if self.user else 'admin'
+        c1 = make_admin_card(cards_wrap, 'inventario.jpg', 'Inventario', 'Control de stock y materia prima.', lambda: self.open_section(1, "GESTIÓN DE INVENTARIO"))
+        c1.grid(row=0, column=0, padx=20, pady=20)
+        admin_cards.append(c1)
 
-        all_configs = [
-            ('inventario.jpg', 'Inventario', 'Control de stock y materia prima.', lambda: self.open_section(1, "GESTIÓN DE INVENTARIO"), "success", ('administrador', 'admin', 'supervisor')),
-            ('user.png', 'Usuarios', 'Gestión de personal y accesos.', lambda: self.open_section(2, "GESTIÓN DE USUARIOS"), "info", ('administrador', 'admin')),
-            ('seguridad.png', 'Seguridad', 'Auditoría y respaldos de DB.', lambda: self.open_section(3, "SEGURIDAD Y AUDITORÍA"), "warning", ('administrador', 'admin')),
-            ('pos.png', 'Menú / Productos', 'Gestión de productos y precios.', lambda: self.open_section(4, "GESTIÓN DE MENÚ"), "primary", ('administrador', 'admin', 'supervisor')),
-            ('efectivo.jpeg', 'Cierres de Caja', 'Historial de reportes de cierre.', lambda: self.open_section(5, "HISTORIAL DE CIERRES"), "success", ('administrador', 'admin', 'supervisor'))
-        ]
+        c2 = make_admin_card(cards_wrap, 'user.png', 'Usuarios', 'Gestión de personal y accesos.', lambda: self.open_section(2, "GESTIÓN DE USUARIOS"))
+        c2.grid(row=0, column=1, padx=20, pady=20)
+        admin_cards.append(c2)
 
-        visible_configs = [c for c in all_configs if role in c[5]]
+        c3 = make_admin_card(cards_wrap, 'seguridad.png', 'Seguridad', 'Auditoría y respaldos de DB.', lambda: self.open_section(3, "SEGURIDAD Y AUDITORÍA"))
+        c3.grid(row=0, column=2, padx=20, pady=20)
+        admin_cards.append(c3)
 
-        for i, (img, title, desc, cmd, color, roles) in enumerate(visible_configs):
-            row, col = divmod(i, 3)
-            card = make_admin_card(cards_wrap, img, title, desc, cmd, color)
-            card.grid(row=row, column=col, padx=25, pady=25)
-            admin_cards.append(card)
+        c4 = make_admin_card(cards_wrap, 'pos.png', 'Menú / Productos', 'Gestión de productos y precios.', lambda: self.open_section(4, "GESTIÓN DE MENÚ"))
+        c4.grid(row=0, column=3, padx=20, pady=20)
+        admin_cards.append(c4)
 
-        for i in range(3):
-            cards_wrap.columnconfigure(i, weight=1)
+        # Navegación por flechas para las tarjetas de Admin (Fila de 4)
+        def nav_admin(idx, e):
+            if e.keysym == 'Left' and idx > 0: admin_cards[idx-1].focus_set()
+            elif e.keysym == 'Right' and idx < len(admin_cards)-1: admin_cards[idx+1].focus_set()
 
-        # --- SECCIÓN DE HERRAMIENTAS SIEMPRE VISIBLE AL FINAL ---
-        ttk.Separator(main_container, orient='horizontal').pack(fill='x', pady=50)
-        self.setup_admin_tools(main_container)
+        for i, card in enumerate(admin_cards):
+            card.bind("<Left>", lambda e, idx=i: nav_admin(idx, e))
+            card.bind("<Right>", lambda e, idx=i: nav_admin(idx, e))
 
-    def setup_cierre_history(self):
-        """Configura la pestaña para ver el historial de cierres de caja."""
-        for w in self.cierre_history_frame.winfo_children():
-            w.destroy()
-
-        # Logo Pik'ta en la cabecera
-        logo_path = os.path.join('Imagenes', 'pikta2.png')
-        if os.path.exists(logo_path):
-            img = load_image(logo_path, size=(80, 80))
-            if img:
-                lbl = ttk.Label(self.cierre_history_frame, image=img)
-                lbl.image = img
-                lbl.pack(pady=5)
-
-        ttk.Label(self.cierre_history_frame, text="📊 HISTORIAL DE CIERRES DE CAJA", font=(None, 18, 'bold')).pack(pady=10)
-
-        main_c = ttk.Frame(self.cierre_history_frame)
-        main_c.pack(fill='both', expand=True)
-
-        # Lista de cierres (Lado Izquierdo)
-        left = ttk.Frame(main_c, width=300)
-        left.pack(side='left', fill='y', padx=10)
-
-        ttk.Label(left, text="Seleccione un Cierre:", font=(None, 11, 'bold')).pack(pady=5)
-
-        self.cierre_list = ttk.Treeview(left, columns=('ID', 'Fecha', 'Total'), show='headings', height=15)
-        self.cierre_list.heading('ID', text='ID')
-        self.cierre_list.heading('Fecha', text='Fecha')
-        self.cierre_list.heading('Total', text='Total')
-        self.cierre_list.column('ID', width=50)
-        self.cierre_list.column('Fecha', width=150)
-        self.cierre_list.column('Total', width=80)
-        self.cierre_list.pack(fill='both', expand=True)
-
-        # Vista del Reporte (Lado Derecho)
-        right = ttk.Frame(main_c)
-        right.pack(side='right', fill='both', expand=True, padx=10)
-
-        ttk.Label(right, text="Vista del Reporte:", font=(None, 11, 'bold')).pack(pady=5)
-        self.cierre_view = tk.Text(right, font=("Courier", 11), bg="#f0f0f0", state='disabled')
-        self.cierre_view.pack(fill='both', expand=True)
-
-        def on_cierre_select(e):
-            sel = self.cierre_list.selection()
-            if not sel: return
-            cid = self.cierre_list.item(sel[0])['values'][0]
-
-            res = self.db.fetch_one("SELECT reporte_texto FROM caja_sesiones WHERE id = ?", (cid,))
-            if res:
-                self.cierre_view.config(state='normal')
-                self.cierre_view.delete('1.0', 'end')
-                self.cierre_view.insert('1.0', res[0] or "Sin texto de reporte")
-                self.cierre_view.config(state='disabled')
-
-        self.cierre_list.bind('<<TreeviewSelect>>', on_cierre_select)
-
-        # Botones de Acción
-        btn_f = ttk.Frame(self.cierre_history_frame)
-        btn_f.pack(fill='x', pady=10)
-
-        ttk.Button(btn_f, text="🔄 ACTUALIZAR LISTA", command=self.refresh_cierres, bootstyle="info").pack(side='left', padx=10)
-
-        def print_historical():
-            txt = self.cierre_view.get('1.0', 'end-1c')
-            if not txt.strip():
-                messagebox.showwarning("Aviso", "Seleccione un cierre primero.")
-                return
-            
-            temp_dir = os.path.join(os.environ.get('TEMP', 'C:\\temp'), 'PiktaInvoices')
-            if not os.path.exists(temp_dir): os.makedirs(temp_dir)
-            
-            base_name = f"cierre_historial_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
-            filename = os.path.join(temp_dir, base_name)
-            with open(filename, "w", encoding="utf-8") as f:
-                f.write(txt)
-            os.startfile(filename)
-            messagebox.showinfo("Impresión", "Reporte enviado a imprimir.")
-
-        ttk.Button(btn_f, text="🖨 IMPRIMIR SELECCIONADO", command=print_historical, bootstyle="success").pack(side='left', padx=10)
-
-        self.refresh_cierres()
-
-    def refresh_cierres(self):
-        """Actualiza la lista de cierres de caja."""
-        if hasattr(self, 'cierre_list'):
-            self.cierre_list.delete(*self.cierre_list.get_children())
-            rows = self.db.fetch_all("SELECT id, cierre_at, cierre_total FROM caja_sesiones WHERE estado='CERRADO' ORDER BY id DESC")
-            for r in rows:
-                fecha = datetime.fromisoformat(r[1]).strftime('%d/%m/%Y %H:%M') if r[1] else "N/A"
-                self.cierre_list.insert('', 'end', values=(r[0], fecha, f"${r[2]:.2f}"))
-
-    def setup_admin_tools(self, parent):
-        """Herramientas especiales para el administrador con un diseño destacado."""
-        tools_frame = ttk.Frame(parent, padding=(0, 40, 0, 0))
-        tools_frame.pack(fill='x', side='bottom')
-
-        # Línea divisoria
-        ttk.Separator(tools_frame, orient='horizontal').pack(fill='x', pady=20)
-
-        ttk.Label(tools_frame, text="🛠️ Herramientas de Mantenimiento Avanzado", font=(None, 14, 'bold'), bootstyle="secondary").pack(anchor='w', padx=10, pady=(0, 15))
-        
-        btn_container = ttk.Frame(tools_frame)
-        btn_container.pack(fill='x')
-        
-        # Botones con iconos y estilos claros
-        btn_clear = ttk.Button(btn_container, text="🧹 LIMPIAR PEDIDOS (REINICIAR COCINA)", 
-                  command=self.clear_all_orders, bootstyle="danger", padding=12)
-        btn_clear.pack(side='left', padx=10)
-        
-        btn_reset = ttk.Button(btn_container, text="📦 REINICIAR INVENTARIO A CERO", 
-                  command=self.reset_inventory, bootstyle="warning", padding=12)
-        btn_reset.pack(side='left', padx=10)
-        
-        btn_backup = ttk.Button(btn_container, text="💾 CREAR RESPALDO DE SEGURIDAD (BACKUP)", 
-                  command=self.manual_backup, bootstyle="success", padding=12)
-        btn_backup.pack(side='left', padx=10)
-
-        ttk.Label(tools_frame, text="Nota: Estas acciones son irreversibles. Use con precaución.", font=(None, 9, 'italic'), bootstyle="muted").pack(anchor='w', padx=15, pady=10)
-
-    def clear_all_orders(self):
-        """Elimina todos los pedidos de la base de datos para empezar de cero."""
-        if messagebox.askyesno("Confirmar Limpieza", "¿Está seguro de eliminar TODOS los pedidos? Esta acción no se puede deshacer."):
-            try:
-                with self.db.get_connection() as conn:
-                    conn.execute("DELETE FROM pedidos")
-                messagebox.showinfo("Éxito", "Todos los pedidos han sido eliminados. La cocina está limpia.")
-                # Si hay una instancia de KDS abierta, refrescarla si es posible
-            except Exception as e:
-                messagebox.showerror("Error", f"No se pudo limpiar los pedidos: {e}")
-
-    def reset_inventory(self):
-        """Reinicia los valores de inventario a cero."""
-        if messagebox.askyesno("Confirmar Reinicio", "¿Desea poner todas las existencias de inventario en cero?"):
-            try:
-                with self.db.get_connection() as conn:
-                    conn.execute("UPDATE inventario SET cantidad = 0")
-                messagebox.showinfo("Éxito", "Inventario reiniciado correctamente.")
-            except Exception as e:
-                messagebox.showerror("Error", f"No se pudo reiniciar el inventario: {e}")
+        for i in range(4): cards_wrap.columnconfigure(i, weight=1)
 
     def open_section(self, index, title):
-        """Abre una sección específica y actualiza la cabecera de forma instantánea."""
-        # 1. Carga perezosa ultra-rápida (Crear widgets si no existen)
-        if index == 1 and not hasattr(self, 'inv_tree'): self.setup_inventory()
-        elif index == 2 and not hasattr(self, 'user_tree'): self.setup_users()
-        elif index == 3 and not hasattr(self, 'audit_tree'): self.setup_security()
-        elif index == 4 and not hasattr(self, 'menu_tree'): self.setup_menu()
-        elif index == 5 and not hasattr(self, 'cierre_list'): self.setup_cierre_history()
-
-        # 2. Cambiar de pestaña e interfaz inmediatamente
+        """Abre una sección específica y actualiza la cabecera."""
         self.notebook.select(index)
         self.title_lbl.config(text=f"📊 {title}")
-        self.btn_back_main.pack_forget()
-        self.btn_back_admin.pack(side='right', padx=5)
-        
-        # 3. Forzar actualización visual antes de la carga de datos pesada
-        self.update_idletasks()
-
-        # 4. Refrescar datos con un ligero retraso para no bloquear la animación de cambio de pestaña
-        def delayed_refresh():
-            if index == 1: self.refresh_inventory()
-            elif index == 2: self.refresh_users()
-            elif index == 3: self.refresh_security()
-            elif index == 4: self.refresh_menu()
-            elif index == 5: self.refresh_cierres()
-        
-        self.after(10, delayed_refresh)
+        self.btn_back_main.pack_forget() # Ocultar botón principal
+        self.btn_back_admin.pack(side='right', padx=5) # Mostrar botón volver al admin
+        self.refresh()
 
     def show_admin_menu(self):
-        """Vuelve al menú principal de administración."""
+        """Vuelve al menú de cuadritos del admin."""
         self.notebook.select(0)
         self.title_lbl.config(text='📊 PANEL DE ADMINISTRACIÓN')
         self.btn_back_admin.pack_forget()
         self.btn_back_main.pack(side='right', padx=5)
 
     def refresh(self):
-        """Refresca la sección activa detectando automáticamente cuál es."""
+        """Refresca la sección activa."""
         try:
             idx = self.notebook.index('current')
             if idx == 1: self.refresh_inventory()
             elif idx == 2: self.refresh_users()
             elif idx == 3: self.refresh_security()
             elif idx == 4: self.refresh_menu()
-            elif idx == 5: self.refresh_cierres()
         except: pass
 
     def setup_inventory(self):
@@ -2759,6 +1695,12 @@ class AdminFrame(tk.Canvas):
         
         ttk.Button(form, text='CREAR USUARIO', command=self.create_user, bootstyle="success").pack(pady=10)
 
+    def refresh(self):
+        """Refresca todas las sub-secciones del panel admin."""
+        self.refresh_inventory()
+        self.refresh_users()
+        self.refresh_security()
+
     def setup_security(self):
         """Configura el panel de seguridad y métricas con un diseño limpio."""
         # --- Métricas de Seguridad ---
@@ -2775,14 +1717,8 @@ class AdminFrame(tk.Canvas):
         self.lbl_sessions = ttk.Label(m_inner, text="👥 Sesiones activas: 0", font=(None, 14), bootstyle="info")
         self.lbl_sessions.grid(row=0, column=1, padx=30)
         
-        self.lbl_license = ttk.Label(m_inner, text="✓ SISTEMA ACTIVADO", font=(None, 14), bootstyle="success")
-        self.lbl_license.grid(row=0, column=2, padx=30)
-        
         btn_backup = ttk.Button(m_inner, text="💾 Generar Respaldo DB", command=self.manual_backup, bootstyle="success", padding=10)
-        btn_backup.grid(row=0, column=3, padx=30)
-        
-        btn_test_print = ttk.Button(m_inner, text="🖨 Probar Impresora/Cajón", command=self.test_printer, bootstyle="info", padding=10)
-        btn_test_print.grid(row=0, column=4, padx=30)
+        btn_backup.grid(row=0, column=2, padx=30)
 
         # --- Tabla de Auditoría ---
         ttk.Label(self.security_frame, text="Historial de Auditoría (Últimas Actividades)", font=(None, 16, 'bold')).pack(anchor='w', pady=15)
@@ -2804,78 +1740,6 @@ class AdminFrame(tk.Canvas):
             messagebox.showinfo("Backup Exitoso", f"Copia de seguridad creada en:\n{path}")
         else:
             messagebox.showerror("Error", "No se pudo crear la copia de seguridad")
-
-    def test_printer(self):
-        """Realiza una prueba de impresión y apertura de cajón."""
-        printer_name = find_pos_printer()
-        if not printer_name:
-            messagebox.showerror("Error", "No se detectó ninguna impresora térmica POS instalada.")
-            return
-            
-        confirm = messagebox.askyesno("Prueba", f"¿Desea probar la impresora:\n{printer_name}?\n\nSe enviará un ticket de prueba y se abrirá el cajón.")
-        if not confirm: return
-        
-        test_text = """
-    ====================================
-    *       PRUEBA DE IMPRESION        *
-    *         PIK'TA SOFT              *
-    ====================================
-    FECHA:       {}
-    ESTADO:      CORRECTO
-    ------------------------------------
-    SISTEMA OPERATIVO: {}
-    IMPRESORA DETECTADA:
-    {}
-    ------------------------------------
-    ¡PRUEBA EXITOSA!
-    ====================================
-    
-    
-    
-    """.format(datetime.now().strftime('%d/%m/%Y %H:%M:%S'), sys.platform, printer_name)
-        
-        # 1. Abrir Cajón
-        try:
-            hPrinter = win32print.OpenPrinter(printer_name)
-            raw_data = b'\x1b\x70\x00\x19\xfa'
-            win32print.StartDocPrinter(hPrinter, 1, ("Prueba Cajon", None, "RAW"))
-            win32print.StartPagePrinter(hPrinter)
-            win32print.WritePrinter(hPrinter, raw_data)
-            win32print.EndPagePrinter(hPrinter)
-            win32print.EndDocPrinter(hPrinter)
-            win32print.ClosePrinter(hPrinter)
-        except Exception as e:
-            messagebox.showerror("Error Cajón", f"No se pudo abrir el cajón: {e}")
-            
-        # 2. Imprimir Ticket (PIL)
-        from PIL import Image, ImageDraw, ImageFont
-        img_width = 380
-        lines = test_text.split('\n')
-        img_height = 100 + (len(lines) * 25)
-        img = Image.new('RGB', (img_width, img_height), 'white')
-        draw = ImageDraw.Draw(img)
-        try:
-            font = ImageFont.truetype("arialbd.ttf", 14)
-        except:
-            font = ImageFont.load_default()
-            
-        y = 20
-        for line in lines:
-            draw.text((10, y), line, fill='black', font=font)
-            y += 25
-            
-        filename = "test_print.png"
-        img.save(filename)
-        try:
-            win32api.ShellExecute(0, "printto", filename, f'"{printer_name}"', ".", 0)
-            messagebox.showinfo("Éxito", "Prueba de impresión enviada y cajón abierto.")
-        except Exception as e:
-            os.startfile(filename, "print")
-            messagebox.showinfo("Prueba", f"Enviado a imprimir por defecto (ShellExecute falló: {e})")
-
-    def open_license_window(self):
-        """Deshabilitado."""
-        messagebox.showinfo("Licencia", "Sistema permanentemente activado.")
 
     def refresh_security(self):
         """Actualiza las métricas y logs de seguridad."""
@@ -3096,9 +1960,6 @@ class LoginWindow(ttk.Toplevel):
         self.username.focus_set()
         self.bind('<Return>', lambda e: self.try_login()) # Enter para loguear
         self.bind('<Escape>', lambda e: self.cancel())    # Escape para cerrar
-        
-        # Manejar el cierre por la "X" de la ventana
-        self.protocol("WM_DELETE_WINDOW", self.cancel)
 
     def try_login(self):
         """Verifica el usuario y contraseña contra la base de datos."""
@@ -3147,28 +2008,34 @@ class App(ttk.Window):
     Gestiona el ciclo de vida del programa, el login persistente y el dashboard principal.
     """
     def __init__(self):
+        # Iniciar ventana con el tema 'superhero' que es más moderno y agradable
         super().__init__(themename="superhero")
-        self.withdraw()
+        self.withdraw() # Ocultar ventana principal al inicio
         
         self.title('SISTEMA POS PIK\'TA - Gestión de Restaurante')
         self.db = DatabaseManager()
         self.user = None
         self.session_token = None
 
-        # Sin verificación de licencia
+        # --- Bucle de Login Persistente ---
         self.run_login_loop()
 
+        # Construir la interfaz mientras la ventana está oculta (withdraw)
         self.build()
         
+        # Configurar navegación global por teclado
         self.bind_all('<Return>', self._on_global_return)
         
+        # Iniciar verificación periódica de sesión (cada 1 minuto)
         self.after(60000, self._check_session_periodically)
         
+        # Ahora que está construida, posicionar y mostrar
         self.geometry("1280x800")
         center_window(self, 1280, 800)
         self.state('zoomed')
         self.deiconify()
         
+        # Pie de página global con Derechos de Autor
         footer = ttk.Frame(self, bootstyle="secondary", padding=5)
         footer.pack(fill='x', side='bottom')
         ttk.Label(footer, text='SISTEMA POS PIK\'TA | Desarrollado por YAFA SOLUTIONS © 2026', 
@@ -3203,15 +2070,15 @@ class App(ttk.Window):
             pass
 
     def run_login_loop(self):
-        """Maneja el proceso de inicio de sesión hasta que sea exitoso o se cierre la ventana."""
+        """Maneja el proceso de inicio de sesión hasta que sea exitoso o se cancele."""
         while not self.user:
             login = LoginWindow(self, self.db)
             self.wait_window(login)
             if not self.user:
-                # Si el usuario es None, significa que cerró la ventana o canceló
-                self.destroy()
-                sys.exit(0) # Salida total inmediata
-                return
+                if not messagebox.askretrycancel("Login Requerido", "¿Desea intentar iniciar sesión nuevamente?"):
+                    self.destroy()
+                    sys.exit(0) # Salida forzada para evitar continuar con el __init__
+                    return
 
     def _check_session_periodically(self):
         """Verifica si la sesión sigue siendo válida."""
@@ -3227,19 +2094,32 @@ class App(ttk.Window):
         w = self.focus_get()
         if not w: return
         
-        # 1. Si es un botón, ejecutarlo
+        # Si es un botón, ejecutarlo
         if isinstance(w, (ttk.Button, tk.Button)):
             w.invoke()
             return
 
-        # 2. Otros widgets interactivos
-        if isinstance(w, (ttk.Radiobutton, tk.Radiobutton)):
+        # Si estamos en el KDS y el foco está en la lista o el frame
+        tab_id = self.notebook.select()
+        if not tab_id: return
+        
+        # Obtener el nombre de la pestaña actual
+        tab_text = self.notebook.tab(self.notebook.select(), "text")
+        
+        # Caso especial para Cocina (KDS)
+        if "Cocina" in tab_text:
+            frame = self.nametowidget(tab_id)
+            if hasattr(frame, 'advance_order_state'):
+                frame.advance_order_state()
+                return
+
+        # Comportamiento por defecto para otros widgets
+        if isinstance(w, tk.Listbox):
+            w.event_generate('<Return>')
+        elif isinstance(w, (ttk.Radiobutton, tk.Radiobutton)):
             w.invoke()
         elif hasattr(w, '_card_cmd'):
             w._card_cmd()
-        elif isinstance(w, tk.Listbox):
-            # Comportamiento por defecto para listbox si no se manejó antes
-            w.event_generate('<Return>')
 
     def build(self):
         """Crea el diseño general."""
@@ -3255,15 +2135,10 @@ class App(ttk.Window):
         # Botón para salir (más grande)
         self.btn_logout = ttk.Button(header, text='Cerrar Sesión', command=self.logout, bootstyle="danger", cursor="hand2", padding=12)
         self.btn_logout.pack(side='right', pady=10)
-        # self.btn_logout.bind('<Return>', lambda e: self.logout()) # Redundante con global handler
+        self.btn_logout.bind('<Return>', lambda e: self.logout())
 
         # --- Contenedor de Pestañas (Navegación Principal) ---
         style = ttk.Style()
-        # Definir Large.TButton heredando de los estilos base de ttkbootstrap
-        style.configure("Large.TButton", font=(None, 18, 'bold'))
-        style.configure("Light.Large.TButton", font=(None, 18, 'bold'), background="#f8f9fa", foreground="#212529")
-        style.map("Light.Large.TButton", background=[('active', '#e2e6ea')])
-        
         style.layout('Hidden.TNotebook.Tab', []) 
         # Configurar el Notebook para que no tenga bordes ni fondos que tapen el logo
         style.configure('Hidden.TNotebook', borderwidth=0, highlightthickness=0, background=BG)
@@ -3318,15 +2193,12 @@ class App(ttk.Window):
 
             # 2. Dibujar las tarjetas (Simuladas en el Canvas para transparencia real)
             cards_data = [
-                ('WhatsApp.jpg', 'WhatsApp Web', 'Gestión de clientes.', self.open_whatsapp, SUCCESS, ('administrador', 'admin', 'supervisor', 'rommel')),
-                ('pos.png', 'Caja / POS', 'Ventas y cobros.', self.open_pos, INFO, ('administrador', 'admin', 'cajera', 'supervisor', 'rommel')),
-                ('user.png', 'Mesero', 'Pedidos a mesa.', self.open_mesero, WARNING, ('administrador', 'admin', 'mesero', 'supervisor', 'rommel')),
-                ('cocina.jpeg', 'Cocina (KDS)', 'Gestión de órdenes.', self.open_kds, DANGER, ('administrador', 'admin', 'cocina', 'rommel')),
-                ('admin.jpeg', 'Admin', 'Configuración.', self.open_admin, PRIMARY, ('administrador', 'admin', 'supervisor'))
+                ('WhatsApp.jpg', 'WhatsApp Web', 'Gestión de clientes.', self.open_whatsapp, SUCCESS),
+                ('pos.png', 'Caja / POS', 'Ventas y cobros.', self.open_pos, INFO),
+                ('user.png', 'Mesero', 'Pedidos a mesa.', self.open_mesero, WARNING),
+                ('cocina.jpeg', 'Cocina (KDS)', 'Gestión de órdenes.', self.open_kds, DANGER),
+                ('admin.jpeg', 'Admin', 'Configuración.', self.open_admin, PRIMARY)
             ]
-            
-            # Filtrar tarjetas según el rol del usuario
-            cards_data = [c for c in cards_data if role in c[5]]
 
             # Mapeo de bootstyles a colores reales para el canvas (Superhero Theme)
             color_map = {
@@ -3356,7 +2228,7 @@ class App(ttk.Window):
             home.tab_focus_frame.place(x=-100, y=-100) # Fuera de vista
             focus_buttons = []
 
-            for i, (img_name, title, desc, cmd, bootstyle_name, roles) in enumerate(cards_data):
+            for i, (img_name, title, desc, cmd, bootstyle_name) in enumerate(cards_data):
                 x = start_x + (card_w + gap) * i
                 y = start_y
                 
@@ -3447,103 +2319,85 @@ class App(ttk.Window):
 
         # --- Carga Dinámica de Pestañas según Rol ---
         # Solo se añaden las pestañas a las que el usuario tiene permiso de acceder.
-        self.available_tabs = {}
-        
-        # WhatsApp Web: Admin, Supervisor, Rommel
-        if role in ('administrador', 'admin', 'supervisor', 'rommel'):
-            self.available_tabs['WhatsApp Web'] = {'class': WhatsAppFrame, 'text': 'WhatsApp Web'}
-            self.notebook.add(ttk.Frame(self.notebook), text='WhatsApp Web')
-
-        # Caja / POS: Admin, Cajera, Supervisor, Rommel
-        if role in ('administrador', 'admin', 'cajera', 'supervisor', 'rommel'):
-            self.available_tabs['Caja / POS'] = {'class': POSFrame, 'text': 'Caja / POS'}
-            self.notebook.add(ttk.Frame(self.notebook), text='Caja / POS')
-
-        # Mesero: Admin, Mesero, Supervisor, Rommel
-        if role in ('administrador', 'admin', 'mesero', 'supervisor', 'rommel'):
-            self.available_tabs['Mesero'] = {'class': MeseroFrame, 'text': 'Mesero'}
-            self.notebook.add(ttk.Frame(self.notebook), text='Mesero')
-
-        # Cocina: Admin, Cocina, Rommel
-        if role in ('administrador', 'admin', 'cocina', 'rommel'):
-            self.available_tabs['Cocina (KDS)'] = {'class': KDSFrame, 'text': 'Cocina (KDS)'}
-            self.notebook.add(ttk.Frame(self.notebook), text='Cocina (KDS)')
-
-        # Admin: EXCLUSIVO para Administrador y Supervisor
+        # IMPORTANTE: Se añadió 'administrador' y 'admin' para asegurar el acceso total.
         if role in ('administrador', 'admin', 'supervisor'):
-            self.available_tabs['Admin'] = {'class': AdminFrame, 'text': 'Admin'}
-            self.notebook.add(ttk.Frame(self.notebook), text='Admin')
+            whatsapp_tab = WhatsAppFrame(self.notebook, self.db)
+            self.notebook.add(whatsapp_tab, text='WhatsApp Web')
+
+        if role in ('administrador', 'admin', 'cajera', 'supervisor'):
+            pos_tab = POSFrame(self.notebook, self.db, user=self.user)
+            self.notebook.add(pos_tab, text='Caja / POS')
+
+        if role in ('administrador', 'admin', 'mesero', 'supervisor'):
+            mesero_tab = MeseroFrame(self.notebook, self.db, user=self.user)
+            self.notebook.add(mesero_tab, text='Mesero')
+
+        if role in ('administrador', 'admin', 'cocina'):
+            kds_tab = KDSFrame(self.notebook, self.db, user=self.user)
+            self.notebook.add(kds_tab, text='Cocina (KDS)')
+
+        if role in ('administrador', 'admin', 'supervisor', 'super'):
+            admin_tab = AdminFrame(self.notebook, self.db)
+            self.notebook.add(admin_tab, text='Admin')
 
         # --- Atajos de Teclado Globales ---
         # CTRL + W para WhatsApp, CTRL + P para POS, CTRL + M para Mesero, CTRL + K para KDS, CTRL + A para Admin
-        self.bind_all('<Control-w>', lambda e: self.open_whatsapp() if role in ('administrador','admin','supervisor','rommel') else None)
-        self.bind_all('<Control-p>', lambda e: self.open_pos() if role in ('administrador','admin','cajera','supervisor','rommel') else None)
-        self.bind_all('<Control-m>', lambda e: self.open_mesero() if role in ('administrador','admin','mesero','supervisor','rommel') else None)
-        self.bind_all('<Control-k>', lambda e: self.open_kds() if role in ('administrador','admin','cocina','rommel') else None)
+        self.bind_all('<Control-w>', lambda e: self.open_whatsapp() if role in ('administrador','admin','supervisor') else None)
+        self.bind_all('<Control-p>', lambda e: self.open_pos() if role in ('administrador','admin','cajera','supervisor') else None)
+        self.bind_all('<Control-m>', lambda e: self.open_mesero() if role in ('administrador','admin','mesero','supervisor') else None)
+        self.bind_all('<Control-k>', lambda e: self.open_kds() if role in ('administrador','admin','cocina') else None)
         self.bind_all('<Control-a>', lambda e: self.open_admin() if role in ('administrador','admin','supervisor') else None)
-        self.bind_all('<Escape>', lambda e: self.notebook.select(0)) # Escape para volver al Home
-
-    def get_or_create_frame(self, tab_text):
-        """Retorna el frame de una pestaña, creándolo si es necesario (Lazy Loading)."""
-        tabs = self.notebook.tabs()
-        for i, tab_id in enumerate(tabs):
-            try:
-                if self.notebook.tab(i, 'text') == tab_text:
-                    widget = self.notebook.nametowidget(tab_id)
-                    # Si el widget es un Frame genérico (placeholder), reemplazarlo
-                    if isinstance(widget, ttk.Frame) and not isinstance(widget, (WhatsAppFrame, POSFrame, MeseroFrame, KDSFrame, AdminFrame)):
-                        tab_info = self.available_tabs.get(tab_text)
-                        if tab_info:
-                            # Crear el frame real
-                            real_frame = tab_info['class'](self.notebook, self.db, user=self.user)
-                            # Reemplazar el placeholder de forma segura: insertar antes de borrar
-                            self.notebook.insert(i, real_frame, text=tab_text)
-                            self.notebook.forget(i + 1)
-                            return real_frame
-                    return widget
-            except:
-                continue
-        return None
 
     def open_whatsapp(self):
         """Cambia a la pestaña de WhatsApp Web y lanza automáticamente la ventana integrada."""
-        frame = self.get_or_create_frame('WhatsApp Web')
-        if frame:
-            self.notebook.select(frame)
-            if hasattr(frame, 'connect_wa'):
-                frame.connect_wa()
+        for i in range(self.notebook.index('end')):
+            if self.notebook.tab(i, 'text') == 'WhatsApp Web':
+                self.notebook.select(i)
+                frame = self.notebook.nametowidget(self.notebook.tabs()[i])
+                # Lanzar WhatsApp automáticamente al entrar
+                if hasattr(frame, 'connect_wa'):
+                    frame.connect_wa()
+                return
 
     def open_pos(self):
         """Cambia a la pestaña del Punto de Venta."""
-        frame = self.get_or_create_frame('Caja / POS')
-        if frame:
-            self.notebook.select(frame)
-            if hasattr(frame, 'products_frame') and not frame.products_frame.winfo_children():
-                if hasattr(frame, 'render_products'): frame.render_products()
-            if hasattr(frame, 'refresh_unpaid_orders'): frame.refresh_unpaid_orders()
+        for i in range(self.notebook.index('end')):
+            if self.notebook.tab(i, 'text') == 'Caja / POS':
+                self.notebook.select(i)
+                frame = self.notebook.nametowidget(self.notebook.tabs()[i])
+                # Solo renderizar si no hay hijos o para refrescar datos importantes
+                if hasattr(frame, 'products_frame') and not frame.products_frame.winfo_children():
+                    if hasattr(frame, 'render_products'): frame.render_products()
+                if hasattr(frame, 'refresh_unpaid_orders'): frame.refresh_unpaid_orders()
+                return
 
     def open_mesero(self):
         """Cambia a la pestaña de Mesero."""
-        frame = self.get_or_create_frame('Mesero')
-        if frame:
-            self.notebook.select(frame)
-            if hasattr(frame, 'products_frame') and not frame.products_frame.winfo_children():
-                if hasattr(frame, 'render_products'): frame.render_products()
+        for i in range(self.notebook.index('end')):
+            if self.notebook.tab(i, 'text') == 'Mesero':
+                self.notebook.select(i)
+                frame = self.notebook.nametowidget(self.notebook.tabs()[i])
+                if hasattr(frame, 'products_frame') and not frame.products_frame.winfo_children():
+                    if hasattr(frame, 'render_products'): frame.render_products()
+                return
 
     def open_kds(self):
         """Cambia a la pestaña de Cocina."""
-        frame = self.get_or_create_frame('Cocina (KDS)')
-        if frame:
-            self.notebook.select(frame)
-            if hasattr(frame, 'refresh'): frame.refresh()
-            if hasattr(frame, 'btn_back'): frame.btn_back.focus_set()
+        for i in range(self.notebook.index('end')):
+            if self.notebook.tab(i, 'text') == 'Cocina (KDS)':
+                self.notebook.select(i)
+                frame = self.notebook.nametowidget(self.notebook.tabs()[i])
+                if hasattr(frame, 'refresh'): frame.refresh()
+                return
 
     def open_admin(self):
         """Cambia a la pestaña de Administración."""
-        frame = self.get_or_create_frame('Admin')
-        if frame:
-            self.notebook.select(frame)
-            if hasattr(frame, 'refresh'): frame.refresh()
+        for i in range(self.notebook.index('end')):
+            if self.notebook.tab(i, 'text') == 'Admin':
+                self.notebook.select(i)
+                frame = self.notebook.nametowidget(self.notebook.tabs()[i])
+                if hasattr(frame, 'refresh'): frame.refresh()
+                return
 
     def logout(self):
         """Cierra la sesión del usuario y regresa a la pantalla de login."""
