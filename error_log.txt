@@ -14846,3 +14846,65 @@ Traceback (most recent call last):
         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 _tkinter.TclError: unknown option "-bootstyle"
 2026-04-17 23:00:29,382 - ERROR - Error al refrescar seguridad: 'AdminFrame' object has no attribute 'lbl_failed'
+2026-04-18 07:22:25,353 - ERROR - Excepción no capturada
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import time; start=time.time(); import main_app; db=main_app.DatabaseManager(); print('DB init took:', time.time()-start); start=time.time(); from tkinter import Tk; root = Tk(); app = main_app.App(root); print('App init took:', time.time()-start)
+                                                                                                                                                                                             ~~~~~~~~~~~~^^^^^^
+TypeError: App.__init__() takes 1 positional argument but 2 were given
+2026-04-18 07:37:48,347 - ERROR - Error al refrescar seguridad: 'AdminFrame' object has no attribute 'lbl_failed'
+2026-04-18 07:50:09,327 - ERROR - Excepción en callback de Tkinter
+Traceback (most recent call last):
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.3568.0_x64__qbz5n2kfra8p0\Lib\tkinter\__init__.py", line 2079, in __call__
+    return self.func(*args)
+           ~~~~~~~~~^^^^^^^
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT - copia\main_app.py", line 3239, in _on_global_return
+    tab_id = self.notebook.select()
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.3568.0_x64__qbz5n2kfra8p0\Lib\tkinter\ttk.py", line 870, in select
+    return self.tk.call(self._w, "select", tab_id)
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_tkinter.TclError: invalid command name ".!frame5.!notebook"
+2026-04-18 07:50:10,548 - ERROR - Excepción en callback de Tkinter
+Traceback (most recent call last):
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.3568.0_x64__qbz5n2kfra8p0\Lib\tkinter\__init__.py", line 2079, in __call__
+    return self.func(*args)
+           ~~~~~~~~~^^^^^^^
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT - copia\main_app.py", line 3239, in _on_global_return
+    tab_id = self.notebook.select()
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.3568.0_x64__qbz5n2kfra8p0\Lib\tkinter\ttk.py", line 870, in select
+    return self.tk.call(self._w, "select", tab_id)
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_tkinter.TclError: invalid command name ".!frame5.!notebook"
+2026-04-18 07:50:11,020 - ERROR - Excepción en callback de Tkinter
+Traceback (most recent call last):
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.3568.0_x64__qbz5n2kfra8p0\Lib\tkinter\__init__.py", line 2079, in __call__
+    return self.func(*args)
+           ~~~~~~~~~^^^^^^^
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT - copia\main_app.py", line 3239, in _on_global_return
+    tab_id = self.notebook.select()
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.3568.0_x64__qbz5n2kfra8p0\Lib\tkinter\ttk.py", line 870, in select
+    return self.tk.call(self._w, "select", tab_id)
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_tkinter.TclError: invalid command name ".!frame5.!notebook"
+2026-04-18 07:50:11,669 - ERROR - Excepción en callback de Tkinter
+Traceback (most recent call last):
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.3568.0_x64__qbz5n2kfra8p0\Lib\tkinter\__init__.py", line 2079, in __call__
+    return self.func(*args)
+           ~~~~~~~~~^^^^^^^
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT - copia\main_app.py", line 3239, in _on_global_return
+    tab_id = self.notebook.select()
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.3568.0_x64__qbz5n2kfra8p0\Lib\tkinter\ttk.py", line 870, in select
+    return self.tk.call(self._w, "select", tab_id)
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_tkinter.TclError: invalid command name ".!frame5.!notebook"
+2026-04-18 07:50:12,516 - ERROR - Excepción en callback de Tkinter
+Traceback (most recent call last):
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.3568.0_x64__qbz5n2kfra8p0\Lib\tkinter\__init__.py", line 2079, in __call__
+    return self.func(*args)
+           ~~~~~~~~~^^^^^^^
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT - copia\main_app.py", line 3239, in _on_global_return
+    tab_id = self.notebook.select()
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.3568.0_x64__qbz5n2kfra8p0\Lib\tkinter\ttk.py", line 870, in select
+    return self.tk.call(self._w, "select", tab_id)
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_tkinter.TclError: invalid command name ".!frame5.!notebook"

@@ -38,6 +38,7 @@ import time
 import winsound
 import shutil
 import re
+import base64
 try:
     import win32print
     import win32api
@@ -93,30 +94,159 @@ def play_sound_new_order():
 def play_sound_order_ready():
     """Sonido fuerte de campanas para cuando un pedido está listo."""
     try:
-        winsound.PlaySound('SystemDefault', winsound.SND_ALIAS | winsound.SND_ASYNC)
+        # Sonido de "Ding-Ding" (Campana de servicio)
+        winsound.Beep(880, 150)
+        winsound.Beep(1046, 300)
     except:
         pass
 
 # =============================================================================
-# FUNCIONES DE SEGURIDAD (ENCRIPTACIÓN)
+# FUNCIONES DE SEGURIDAD (ENCRIPTACIÓN AVANZADA - FASE 3)
 # =============================================================================
+import bcrypt
+from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from cryptography.hazmat.primitives import hashes
 
-def hash_password(password):
-    """Genera un hash seguro para la contraseña usando PBKDF2."""
-    salt = secrets.token_hex(16)
-    hash_obj = hashlib.pbkdf2_hmac('sha256', password.encode(), salt.encode(), 100000)
-    return f"{salt}:{hash_obj.hex()}"
+class PasswordManager:
+    """Gestión avanzada de contraseñas con múltiples capas (PBKDF2 + Bcrypt)."""
+    PBKDF2_ITERATIONS = 100000 
+    BCRYPT_ROUNDS = 10
+    PEPPER = os.environ.get('PIKTA_PEPPER', 'default_pepper_change_me')
+    
+    @staticmethod
+    def hash_password_advanced(password: str) -> str:
+        pwd_pepper = password + PasswordManager.PEPPER
+        salt = os.urandom(32)
+        kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=salt, iterations=PasswordManager.PBKDF2_ITERATIONS)
+        pbkdf2_hash = kdf.derive(pwd_pepper.encode())
+        bcrypt_hash = bcrypt.hashpw(pbkdf2_hash, bcrypt.gensalt(rounds=PasswordManager.BCRYPT_ROUNDS))
+        return f"2|{salt.hex()}|{bcrypt_hash.decode()}"
+    
+    @staticmethod
+    def verify_password_advanced(provided_password: str, stored_hash: str) -> bool:
+        if not stored_hash: return False
+        
+        # Retrocompatibilidad con hashes antiguos (Fase 1 o anteriores)
+        if ':' in stored_hash and not stored_hash.startswith('2|'):
+            try:
+                salt, hash_value = stored_hash.split(':')
+                hash_obj = hashlib.pbkdf2_hmac('sha256', provided_password.encode(), salt.encode(), 100000)
+                return hash_obj.hex() == hash_value
+            except Exception:
+                return False
+                
+        # Nueva validación Bcrypt
+        try:
+            version, salt_hex, bcrypt_hash = stored_hash.split('|')
+            if version != '2': return False
+            pwd_pepper = provided_password + PasswordManager.PEPPER
+            salt = bytes.fromhex(salt_hex)
+            kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=salt, iterations=PasswordManager.PBKDF2_ITERATIONS)
+            pbkdf2_hash = kdf.derive(pwd_pepper.encode())
+            return bcrypt.checkpw(pbkdf2_hash, bcrypt_hash.encode())
+        except Exception:
+            return False
 
-def verify_password(stored_password, provided_password):
-    """Verifica si la contraseña proporcionada coincide con el hash guardado."""
-    if not stored_password or ':' not in stored_password:
-        return False
-    try:
-        salt, hash_value = stored_password.split(':')
-        hash_obj = hashlib.pbkdf2_hmac('sha256', provided_password.encode(), salt.encode(), 100000)
-        return hash_obj.hex() == hash_value
-    except Exception:
-        return False
+class DataEncryption:
+    """Encriptación de datos sensibles en la base de datos (Ej: Teléfonos)."""
+    def __init__(self):
+        self.key = self._get_or_create_key()
+        self.cipher = Fernet(self.key)
+    
+    def _get_or_create_key(self) -> bytes:
+        key_file = 'encryption.key'
+        if os.path.exists(key_file):
+            with open(key_file, 'rb') as f: return f.read()
+        else:
+            key = Fernet.generate_key()
+            with open(key_file, 'wb') as f: f.write(key)
+            if sys.platform != 'win32': os.chmod(key_file, 0o600)
+            return key
+            
+    def encrypt(self, data: str) -> str:
+        if not data: return data
+        return base64.b64encode(self.cipher.encrypt(data.encode())).decode()
+        
+    def decrypt(self, encrypted_data: str) -> str:
+        if not encrypted_data: return encrypted_data
+        try:
+            decoded = base64.b64decode(encrypted_data.encode())
+            return self.cipher.decrypt(decoded).decode()
+        except: return "*** ENCRYPTED ***"
+
+class PasswordPolicy:
+    """Políticas estrictas de contraseñas para nuevos usuarios."""
+    MIN_LENGTH = 6
+    @classmethod
+    def validate(cls, pwd: str) -> tuple[bool, str]:
+        if len(pwd) < cls.MIN_LENGTH: return False, f"Mínimo {cls.MIN_LENGTH} caracteres"
+        if not any(c.isdigit() for c in pwd): return False, "Debe incluir un número"
+        return True, "OK"
+
+# Funciones puente para no romper código antiguo
+def hash_password(password): 
+    return PasswordManager.hash_password_advanced(password)
+
+def verify_password(stored_password, provided_password): 
+    return PasswordManager.verify_password_advanced(provided_password, stored_password)
+
+# =============================================================================
+# CONTROL DE ACCESO (RBAC - FASE 2)
+# =============================================================================
+from enum import Enum
+from typing import Set
+from functools import wraps
+
+class Permissions(Enum):
+    PRODUCT_MANAGE = "product:manage"
+    USER_MANAGE = "user:manage"
+    INVENTORY_MANAGE = "inventory:manage"
+    SYSTEM_CONFIG = "system:config"
+
+class Role(Enum):
+    ADMIN = "Administrador"
+    SUPERVISOR = "Supervisor"
+    CASHIER = "Cajera"
+    KITCHEN = "Cocina"
+    WAITER = "Mesero"
+    
+    def get_permissions(self) -> Set[Permissions]:
+        if self == Role.ADMIN:
+            return {Permissions.PRODUCT_MANAGE, Permissions.USER_MANAGE, Permissions.INVENTORY_MANAGE, Permissions.SYSTEM_CONFIG}
+        elif self == Role.SUPERVISOR:
+            return {Permissions.PRODUCT_MANAGE, Permissions.INVENTORY_MANAGE}
+        else:
+            return set()
+
+def require_permission(permission: Permissions):
+    """Decorador para verificar permisos en métodos que tienen 'self.user'."""
+    def decorator(func):
+        @wraps(func)
+        def wrapper(self, *args, **kwargs):
+            user = getattr(self, 'user', None)
+            if not user and hasattr(self, 'master'):
+                user = getattr(self.master, 'user', None)
+                
+            if not user:
+                messagebox.showerror("Error", "Usuario no autenticado")
+                return
+                
+            try:
+                user_role = Role(user.get('rol', ''))
+            except ValueError:
+                messagebox.showerror("Acceso Denegado", "Rol no reconocido o sin privilegios.")
+                return
+            
+            if permission not in user_role.get_permissions():
+                messagebox.showerror("Acceso Denegado", f"No tiene permiso para la acción: {permission.value}")
+                try: self.db.log_access(user['id'], user['username'], 'unauthorized_access', func.__name__)
+                except: pass
+                return
+            
+            return func(self, *args, **kwargs)
+        return wrapper
+    return decorator
 
 # =============================================================================
 # GESTOR DE SESIONES
@@ -350,19 +480,13 @@ class DatabaseManager:
             self._ensure_column('pedidos', 'usuario_id', 'INTEGER')
             self._ensure_column('pedidos', 'sesion_id', 'INTEGER')
             self._ensure_column('pedidos', 'created_at', 'TEXT')
+            self._ensure_column('usuarios', 'two_factor_secret', 'TEXT')
             # Columna para marcar el inicio de preparación (KDS)
             self._ensure_column('pedidos', 'preparacion_inicio', 'TEXT')
             self._ensure_column('pedidos', 'preparacion_duracion', 'INTEGER')
 
-            # Migración de contraseñas a formato hash si es necesario
-            cur.execute("SELECT id, username, password FROM usuarios")
-            users = cur.fetchall()
-            for uid, uname, pwd in users:
-                # Si la contraseña no tiene el formato de hash (no contiene ':'), encriptarla
-                if ':' not in pwd:
-                    new_pwd = hash_password(pwd)
-                    cur.execute("UPDATE usuarios SET password = ? WHERE id = ?", (new_pwd, uid))
-                    logging.info(f"Contraseña migrada a hash para usuario: {uname}")
+            # Migración de contraseñas a formato hash seguro (Por lotes y recolector de basura)
+            self._migrate_passwords_safely()
 
             # Usuarios por defecto (con contraseñas ya encriptadas)
             seeds = [
@@ -438,6 +562,24 @@ class DatabaseManager:
         except Exception as e:
             logging.error(f"Error en log de auditoría: {e}")
 
+    def audit_admin_action(self, accion, usuario, detalles='', level='INFO'):
+        import socket
+        try:
+            hostname = socket.gethostname()
+            ip = socket.gethostbyname(hostname)
+        except:
+            hostname, ip = "Unknown", "Unknown"
+            
+        full_details = f"[{hostname} - {ip}] {detalles}"
+        self.audit_log('admin_action', accion, usuario, full_details)
+        
+        if level == 'CRITICAL':
+            try:
+                with open('security_alerts.log', 'a') as f:
+                    f.write(f"{datetime.now().isoformat()} - CRITICAL: {usuario} - {accion} - {full_details}\n")
+            except:
+                pass
+
     def create_backup(self):
         """Crea una copia de seguridad de la base de datos actual."""
         if not os.path.exists('Backups'):
@@ -461,8 +603,50 @@ class DatabaseManager:
             logging.error(f"Error al crear backup: {e}")
             return None
 
+    def _migrate_passwords_safely(self, batch_size=50):
+        """Migra contraseñas en lotes pequeños con limpieza de memoria para evitar exposición en RAM."""
+        import gc
+        with self.get_connection() as conn:
+            cur = conn.cursor()
+            while True:
+                # Obtener lote de usuarios SIN migrar al nuevo sistema (que no empiecen con '2|')
+                cur.execute("SELECT id, username, password FROM usuarios WHERE password NOT LIKE '2|%' LIMIT ?", (batch_size,))
+                batch = cur.fetchall()
+                if not batch:
+                    break
+                
+                for uid, uname, pwd in batch:
+                    try:
+                        # Restablecemos usuarios por defecto si fueron corrompidos en la ejecución anterior
+                        if uname in ['Davis', 'Rommel', 'Estefani', 'cocina', 'mesero'] and len(pwd) > 100:
+                            pwd = '1234' # Hard reset de contraseñas corrompidas por el bug de loop
+                        
+                        new_pwd = hash_password(pwd)
+                        cur.execute("UPDATE usuarios SET password = ? WHERE id = ?", (new_pwd, uid))
+                        # Limpiar inmediatamente de memoria
+                        del pwd, new_pwd
+                    except Exception as e:
+                        logging.error(f"Error migrando usuario {uid}: {e}")
+                        continue
+                
+                conn.commit()
+                del batch
+                gc.collect() # Forzar limpieza de memoria
+                time.sleep(0.01) # Pequeña pausa muy corta para permitir GC sin congelar inicio
+
     def _ensure_column(self, table, column, col_type):
-        """Función auxiliar para añadir columnas si no existen (idempotente)."""
+        """Añade columna con validación estricta de nombres y prevención de inyección SQL en DDL."""
+        import re
+        ALLOWED_TABLES = {'productos_menu', 'pedidos', 'inventario', 'usuarios', 'auditoria', 'access_logs', 'caja_sesiones'}
+        
+        if table not in ALLOWED_TABLES:
+            logging.error(f"Tabla no permitida: {table}")
+            return
+            
+        if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', column):
+            logging.error(f"Nombre de columna inválido: {column}")
+            return
+
         with self.get_connection() as conn:
             cur = conn.cursor()
             try:
@@ -476,11 +660,20 @@ class DatabaseManager:
 
     def log_access(self, user_id, username, action, details=''):
         """Guarda un evento de acceso en la tabla access_logs."""
+        import socket
+        try:
+            hostname = socket.gethostname()
+            ip = socket.gethostbyname(hostname)
+        except:
+            hostname, ip = "Unknown", "Unknown"
+        
+        full_details = f"[{hostname} - {ip}] {details}"
+        
         try:
             with self.get_connection() as conn:
                 cur = conn.cursor()
                 cur.execute('INSERT INTO access_logs (user_id, username, action, details, created_at) VALUES (?,?,?,?,?)',
-                            (user_id, username, action, details, datetime.now().isoformat()))
+                            (user_id, username, action, full_details, datetime.now().isoformat()))
                 conn.commit()
         except Exception as e:
             logging.exception(f'Error al registrar acceso: {e}')
@@ -1252,10 +1445,20 @@ class POSFrame(tk.Canvas):
             except Exception:
                 order_prep = default_min
 
+            cliente_nombre = None
+            cliente_telefono = None
+            if canal == 'LLEVAR':
+                cn = simpledialog.askstring('Cliente', 'Nombre del cliente (opcional):', parent=self)
+                ct = simpledialog.askstring('Cliente', 'Teléfono del cliente (opcional):', parent=self)
+                if cn or ct:
+                    enc = DataEncryption()
+                    if cn: cliente_nombre = enc.encrypt(cn)
+                    if ct: cliente_telefono = enc.encrypt(ct)
+
             # Insertar en la base de datos, incluyendo estado de pago y duración de preparación
-            self.db.execute('''INSERT INTO pedidos (numero, items, subtotal, descuento, total, estado, canal, usuario_id, sesion_id, metodo_pago, pagado, preparacion_duracion, created_at)
-                               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)''',
-                            (numero, items, subtotal, 0.0, total, 'RECIBIDO', canal, usuario_id, sesion_id, metodo_pago, pagado, order_prep, created_at))
+            self.db.execute('''INSERT INTO pedidos (numero, cliente_nombre, cliente_telefono, items, subtotal, descuento, total, estado, canal, usuario_id, sesion_id, metodo_pago, pagado, preparacion_duracion, created_at)
+                               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                            (numero, cliente_nombre, cliente_telefono, items, subtotal, 0.0, total, 'RECIBIDO', canal, usuario_id, sesion_id, metodo_pago, pagado, order_prep, created_at))
             
             # Registrar en auditoría
             self.db.audit_log('pedidos', 'INSERT', self.user.get('username'), f'Pedido {canal} creado: {numero}', new=items_list)
@@ -1886,7 +2089,7 @@ class KDSFrame(tk.Canvas):
                                     if hasattr(pos_frame, 'notify_order_ready'):
                                         try: pos_frame.notify_order_ready(f'Pedido Listo: {numero}')
                                         except: pass
-                                    try: play_sound_new_order()
+                                    try: play_sound_order_ready()
                                     except: pass
                                 break
                 except Exception as e:
@@ -2135,12 +2338,20 @@ class AdminFrame(tk.Canvas):
                 card.configure(bootstyle="secondary", padding=2)
                 inner.configure(bootstyle="default")
 
+            def on_click(e): cmd()
+            
+            def bind_events(widget):
+                widget.bind("<Button-1>", on_click)
+                widget.bind("<Return>", on_click)
+                for child in widget.winfo_children():
+                    bind_events(child)
+                    
+            bind_events(card)
+            
+            # Hover events just for card and inner
             card.bind("<Enter>", on_enter); card.bind("<Leave>", on_leave)
             card.bind("<FocusIn>", lambda e: on_enter(None)); card.bind("<FocusOut>", lambda e: on_leave(None))
-            card.bind("<Button-1>", lambda e: cmd())
-            card.bind("<Return>", lambda e: cmd())
-            inner.bind("<Button-1>", lambda e: cmd())
-            inner.bind("<Return>", lambda e: cmd())
+            
             return card
 
         # Tarjetas del Admin con sus imágenes correspondientes
@@ -2289,9 +2500,6 @@ class AdminFrame(tk.Canvas):
         
         ttk.Button(form, text='CREAR USUARIO', command=self.create_user, bootstyle="success").pack(pady=10)
 
-
-        self.refresh_security()
-
     def setup_security(self):
         """Configura el panel de seguridad y métricas con un diseño limpio."""
         # --- Métricas de Seguridad ---
@@ -2326,7 +2534,10 @@ class AdminFrame(tk.Canvas):
         self.audit_tree.column('Fecha', width=180)
         self.audit_tree.column('Detalles', anchor='w', width=400)
         self.audit_tree.pack(fill='both', expand=True)
+        
+        self.refresh_security()
 
+    @require_permission(Permissions.SYSTEM_CONFIG)
     def manual_backup(self):
         """Ejecuta un backup manual desde la interfaz."""
         path = self.db.create_backup()
@@ -2524,6 +2735,7 @@ class AdminFrame(tk.Canvas):
 
         ttk.Label(tools_frame, text="Nota: Estas acciones son irreversibles. Use con precaución.", font=(None, 9, 'italic'), bootstyle="muted").pack(anchor='w', padx=15, pady=10)
 
+    @require_permission(Permissions.SYSTEM_CONFIG)
     def clear_all_orders(self):
         """Elimina todos los pedidos de la base de datos para empezar de cero."""
         if messagebox.askyesno("Confirmar Limpieza", "¿Está seguro de eliminar TODOS los pedidos? Esta acción no se puede deshacer."):
@@ -2534,6 +2746,7 @@ class AdminFrame(tk.Canvas):
             except Exception as e:
                 messagebox.showerror("Error", f"No se pudo limpiar los pedidos: {e}")
 
+    @require_permission(Permissions.SYSTEM_CONFIG)
     def reset_inventory(self):
         """Reinicia los valores de inventario a cero."""
         if messagebox.askyesno("Confirmar Reinicio", "¿Desea poner todas las existencias de inventario en cero?"):
@@ -2592,26 +2805,43 @@ class AdminFrame(tk.Canvas):
         rows = self.db.fetch_all('SELECT id, username, rol, nombre_completo FROM usuarios')
         for row in rows: self.user_tree.insert('', 'end', values=row)
 
+    class PasswordPolicy:
+        @staticmethod
+        def validate(password):
+            if len(password) < 6: return False, "La contraseña debe tener al menos 6 caracteres"
+            if not any(c.isdigit() for c in password): return False, "Debe contener al menos un número"
+            return True, "OK"
+
+    @require_permission(Permissions.USER_MANAGE)
     def create_user(self):
-        """Valida e inserta un nuevo usuario en la base de datos."""
+        """Valida e inserta un nuevo usuario en la base de datos aplicando políticas."""
         u, p, r, n = self.e_user.get().strip(), self.e_pass.get().strip(), self.e_rol.get().strip(), self.e_nombre.get().strip()
         if not u or not p:
             messagebox.showwarning('Error', 'El usuario y la contraseña son obligatorios')
             return
+            
+        is_valid, msg = PasswordPolicy.validate(p)
+        if not is_valid:
+            messagebox.showwarning('Contraseña Débil', msg)
+            return
+            
         try:
             hashed_p = hash_password(p)
             self.db.execute('INSERT INTO usuarios (username, password, rol, nombre_completo) VALUES (?,?,?,?)', (u, hashed_p, r or 'Cajera', n or u))
             
             # Registrar en auditoría
-            self.db.audit_log('usuarios', 'INSERT', 'Admin', f'Usuario creado: {u}')
+            self.db.audit_admin_action('CREAR_USUARIO', 'Admin', f'Usuario creado: {u}', level='CRITICAL')
             
             messagebox.showinfo('Éxito', 'Usuario creado correctamente')
             # Limpiar campos después de crear
             for e in (self.e_user, self.e_pass, self.e_nombre): e.delete(0, 'end')
             self.refresh_users()
+        except sqlite3.IntegrityError:
+            messagebox.showerror('Error', f"El usuario '{u}' ya existe")
         except Exception as e:
             messagebox.showerror('Error', f"No se pudo crear el usuario: {e}")
 
+    @require_permission(Permissions.INVENTORY_MANAGE)
     def add_stock(self, id, amount):
         """Incrementa o decrementa la cantidad de un ingrediente específico."""
         try:
@@ -2685,6 +2915,7 @@ class AdminFrame(tk.Canvas):
             prep = r[6] if r[6] is not None else ''
             self.menu_tree.insert('', 'end', values=(r[0], r[1], r[2], f"${r[3]:.2f}", r[4], disp, prep))
 
+    @require_permission(Permissions.PRODUCT_MANAGE)
     def create_product(self):
         """Inserta un nuevo producto en el menú."""
         n, p, c, e = self.e_prod_name.get().strip(), self.e_prod_price.get().strip(), self.e_prod_cat.get().strip(), self.e_prod_emoji.get().strip()
@@ -2711,6 +2942,7 @@ class AdminFrame(tk.Canvas):
             play_sound_error()
             messagebox.showerror('Error', f"No se pudo crear el producto: {err}")
 
+    @require_permission(Permissions.PRODUCT_MANAGE)
     def delete_product(self):
         """Elimina el producto seleccionado."""
         sel = self.menu_tree.selection()
@@ -2733,12 +2965,17 @@ class LoginWindow(ttk.Toplevel):
         super().__init__(master)
         self.db = db
         self.user = None # Guardará los datos del usuario si el login es exitoso
+        
+        # Bloqueo temporal por intentos fallidos (Seguridad contra Fuerza Bruta)
+        self.locked_until = None
+        self.failed_attempts = {} # username -> failed attempts count
+        self.client_id = self._get_client_identifier()
+        
         self.title('Login - SISTEMA POS PIK\'TA')
         self.resizable(False, False)
         # Aumentar tamaño de la ventana de login para que se aprecie mejor
         center_window(self, 500, 700)
         self.grab_set() # Bloquea interacción con la ventana principal hasta que se cierre esta
-
         container = ttk.Frame(self, padding=30)
         container.pack(fill='both', expand=True)
 
@@ -2782,25 +3019,60 @@ class LoginWindow(ttk.Toplevel):
         # Manejar el cierre por la "X" de la ventana
         self.protocol("WM_DELETE_WINDOW", self.cancel)
 
+    def _get_client_identifier(self):
+        """Obtener identificador único del cliente para bloqueos estrictos."""
+        import uuid, getpass, socket
+        try:
+            identifiers = [socket.gethostname(), getpass.getuser(), str(uuid.getnode())]
+            return hashlib.sha256(''.join(identifiers).encode()).hexdigest()
+        except:
+            return "unknown_client"
+
     def try_login(self):
-        """Verifica el usuario y contraseña contra la base de datos."""
+        """Verifica el usuario y contraseña contra la base de datos (con control Anti-Fuerza Bruta)."""
         u = self.username.get().strip()
         p = self.password.get().strip()
         if not u or not p or u == 'Usuario':
             messagebox.showwarning('Aviso', 'Por favor, ingrese su usuario y contraseña')
             return
+            
+        # Verificar bloqueo temporal general
+        if self.locked_until and datetime.now() < self.locked_until:
+            remaining = (self.locked_until - datetime.now()).seconds // 60
+            messagebox.showwarning(
+                "Cuenta Temporalmente Bloqueada",
+                f"Demasiados intentos fallidos en este dispositivo.\n"
+                f"Espere {remaining} minutos antes de intentar nuevamente."
+            )
+            return
         
         # Consulta de validación
-        row = self.db.fetch_one('SELECT id, username, password, rol, nombre_completo FROM usuarios WHERE username = ?', (u,))
+        row = self.db.fetch_one('SELECT id, username, password, rol, nombre_completo, two_factor_secret FROM usuarios WHERE username = ?', (u,))
         if not row:
-            # Registrar intento fallido
-            self.db.log_access(None, u, 'failed_login', 'Usuario no encontrado')
-            messagebox.showerror('Error', 'Usuario o contraseña incorrectos')
+            self._handle_failed_login(None, u, 'Usuario no encontrado')
             return
         
         stored_password = row[2]
         if verify_password(stored_password, p):
+            if row[3] == 'Administrador':
+                import pyotp
+                secret = row[5]
+                if not secret:
+                    secret = pyotp.random_base32()
+                    self.db.execute("UPDATE usuarios SET two_factor_secret = ? WHERE id = ?", (secret, row[0]))
+                    self._show_qr_setup(secret, u)
+                
+                code = simpledialog.askstring("Autenticación 2FA", "Ingrese el código de Google Authenticator / Authy:", parent=self)
+                totp = pyotp.TOTP(secret)
+                if not code or not totp.verify(code):
+                    messagebox.showerror("Acceso Denegado", "Código 2FA incorrecto.")
+                    self._handle_failed_login(row[0], u, '2FA fallido')
+                    return
+
             # Login exitoso
+            self.failed_attempts[u] = 0 # Resetear contador
+            self.locked_until = None
+            
             user_data = {'id': row[0], 'username': row[1], 'rol': row[3], 'nombre_completo': row[4]}
             
             # Guardar en el master antes de destruir la ventana
@@ -2813,9 +3085,60 @@ class LoginWindow(ttk.Toplevel):
                 logging.exception('Error registrando login')
             self.destroy()
         else:
-            # Registrar intento fallido
-            self.db.log_access(row[0], u, 'failed_login', 'Contraseña incorrecta')
-            messagebox.showerror('Error', 'Usuario o contraseña incorrectos')
+            self._handle_failed_login(row[0], u, 'Contraseña incorrecta')
+
+    def _show_qr_setup(self, secret, username):
+        import pyotp, qrcode, io, tempfile
+        from PIL import Image, ImageTk
+        
+        totp = pyotp.TOTP(secret)
+        uri = totp.provisioning_uri(name=username, issuer_name="PIKTA POS")
+        
+        qr = qrcode.QRCode(version=1, box_size=10, border=5)
+        qr.add_data(uri)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="black", back_color="white")
+        
+        temp_dir = tempfile.gettempdir()
+        qr_path = os.path.join(temp_dir, f"{username}_qr.png")
+        img.save(qr_path)
+        
+        top = tk.Toplevel(self)
+        top.title("Configurar 2FA")
+        top.geometry("450x550")
+        top.grab_set()
+        
+        ttk.Label(top, text="1. Escanee este código con Google Authenticator o Authy", font=(None, 11, 'bold')).pack(pady=10)
+        
+        photo = ImageTk.PhotoImage(file=qr_path)
+        lbl = ttk.Label(top, image=photo)
+        lbl.image = photo
+        lbl.pack()
+        
+        ttk.Label(top, text=f"2. O ingrese este código manualmente:\n{secret}", font=(None, 12, "bold"), justify="center").pack(pady=10)
+        
+        ttk.Button(top, text="Entendido", command=top.destroy, bootstyle="success", padding=10).pack(pady=10)
+        self.wait_window(top)
+
+    def _handle_failed_login(self, user_id, username, reason):
+        """Procesa un intento fallido y bloquea si es necesario."""
+        try: self.db.log_access(user_id, username, 'failed_login', reason)
+        except: pass
+        
+        attempts = self.failed_attempts.get(username, 0) + 1
+        self.failed_attempts[username] = attempts
+        
+        if attempts >= 5:
+            self.locked_until = datetime.now() + timedelta(minutes=15)
+            try: self.db.log_access(user_id, username, 'account_locked', f'IP/Client: {self.client_id}')
+            except: pass
+            messagebox.showwarning(
+                "Demasiados Intentos",
+                "Ha excedido el número de intentos permitidos.\n"
+                "Su dispositivo ha sido bloqueado por 15 minutos por motivos de seguridad."
+            )
+        else:
+            messagebox.showerror('Error', f'Usuario o contraseña incorrectos.\nIntentos restantes: {5 - attempts}')
 
     def cancel(self):
         """Cierra el login sin autenticar."""
@@ -2922,9 +3245,12 @@ class App(ttk.Window):
             w.invoke()
             return
 
-        # Si estamos en el KDS y el foco está en la lista o el frame
-        tab_id = self.notebook.select()
-        if not tab_id: return
+        try:
+            if not hasattr(self, 'notebook') or not self.notebook.winfo_exists(): return
+            tab_id = self.notebook.select()
+            if not tab_id: return
+        except Exception:
+            return
         
         # Obtener el nombre de la pestaña actual
         tab_text = self.notebook.tab(self.notebook.select(), "text")
@@ -3015,13 +3341,17 @@ class App(ttk.Window):
                 home.create_image(cw//2, ch//2, image=home.bg_img, tags="bg")
 
             # 2. Dibujar las tarjetas (Simuladas en el Canvas para transparencia real)
-            cards_data = [
-                ('WhatsApp.jpg', 'WhatsApp Web', 'Gestión de clientes.', self.open_whatsapp, SUCCESS),
-                ('pos.png', 'Caja / POS', 'Ventas y cobros.', self.open_pos, INFO),
-                ('user.png', 'Mesero', 'Pedidos a mesa.', self.open_mesero, WARNING),
-                ('cocina.jpeg', 'Cocina (KDS)', 'Gestión de órdenes.', self.open_kds, DANGER),
-                ('admin.jpeg', 'Admin', 'Configuración.', self.open_admin, PRIMARY)
+            all_cards_data = [
+                ('WhatsApp.jpg', 'WhatsApp Web', 'Gestión de clientes.', self.open_whatsapp, SUCCESS, ['Administrador', 'Supervisor', 'Cajera']),
+                ('pos.png', 'Caja / POS', 'Ventas y cobros.', self.open_pos, INFO, ['Administrador', 'Supervisor', 'Cajera']),
+                ('user.png', 'Mesero', 'Pedidos a mesa.', self.open_mesero, WARNING, ['Administrador', 'Supervisor', 'Cajera', 'Mesero']),
+                ('cocina.jpeg', 'Cocina (KDS)', 'Gestión de órdenes.', self.open_kds, DANGER, ['Administrador', 'Supervisor', 'Cocina']),
+                ('admin.jpeg', 'Admin', 'Configuración.', self.open_admin, PRIMARY, ['Administrador'])
             ]
+            
+            user_role = self.user.get('rol', '') if self.user else ''
+            # Filtrar tarjetas permitidas para este rol (ignorar el último elemento de permisos)
+            cards_data = [c[:5] for c in all_cards_data if user_role in c[5]]
 
             # Mapeo de bootstyles a colores reales para el canvas (Superhero Theme)
             color_map = {
@@ -3177,6 +3507,10 @@ class App(ttk.Window):
 
     def open_admin(self):
         """Cambia a la pestaña de Administración."""
+        if self.user.get('rol') != 'Administrador':
+            messagebox.showerror('Acceso Denegado', 'Solo el Administrador puede ingresar a este módulo.')
+            return
+            
         idx, frame = self._get_or_create_tab('Admin', AdminFrame)
         self.notebook.select(idx)
         if hasattr(frame, 'refresh'): frame.refresh()
