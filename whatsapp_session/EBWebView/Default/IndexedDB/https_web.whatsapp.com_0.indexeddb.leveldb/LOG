@@ -1,25 +1,17 @@
-2026/04/14-20:25:50.874 2978 Reusing MANIFEST C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\whatsapp_session\EBWebView\Default\IndexedDB\https_web.whatsapp.com_0.indexeddb.leveldb/MANIFEST-000001
-2026/04/14-20:25:50.876 2978 Recovering log #25
-2026/04/14-20:25:50.891 2978 Reusing old log C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT\whatsapp_session\EBWebView\Default\IndexedDB\https_web.whatsapp.com_0.indexeddb.leveldb/000025.log 
-2026/04/14-20:25:57.296 1d48 Level-0 table #31: started
-2026/04/14-20:25:57.349 1d48 Level-0 table #31: 1120711 bytes OK
-2026/04/14-20:25:57.353 1d48 Delete type=0 #25
-2026/04/14-20:25:57.359 7618 Compacting 1@1 + 2@2 files
-2026/04/14-20:25:57.510 7618 Generated table #32@1: 94339 keys, 2285035 bytes
-2026/04/14-20:25:57.550 7618 Generated table #33@1: 15333 keys, 1114785 bytes
-2026/04/14-20:25:57.551 7618 Compacted 1@1 + 2@2 files => 3399820 bytes
-2026/04/14-20:25:57.552 7618 compacted to: files[ 0 0 2 0 0 0 0 ]
-2026/04/14-20:26:41.472 2978 Level-0 table #35: started
-2026/04/14-20:26:41.509 2978 Level-0 table #35: 1076100 bytes OK
-2026/04/14-20:26:41.512 2978 Delete type=2 #27
-2026/04/14-20:26:41.512 2978 Delete type=2 #28
-2026/04/14-20:26:41.512 2978 Delete type=0 #30
-2026/04/14-20:26:41.512 2978 Delete type=2 #31
-2026/04/14-20:26:44.766 7618 Compacting 1@1 + 2@2 files
-2026/04/14-20:26:44.867 7618 Generated table #36@1: 48805 keys, 2229993 bytes
-2026/04/14-20:26:44.879 7618 Generated table #37@1: 9567 keys, 443891 bytes
-2026/04/14-20:26:44.879 7618 Compacted 1@1 + 2@2 files => 2673884 bytes
-2026/04/14-20:26:44.880 7618 compacted to: files[ 0 0 2 0 0 0 0 ]
-2026/04/14-20:26:44.881 7618 Delete type=2 #32
-2026/04/14-20:26:44.881 7618 Delete type=2 #33
-2026/04/14-20:26:44.881 7618 Delete type=2 #35
+2026/04/17-21:47:07.947 4388 Reusing MANIFEST C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT - copia\whatsapp_session\EBWebView\Default\IndexedDB\https_web.whatsapp.com_0.indexeddb.leveldb/MANIFEST-000001
+2026/04/17-21:47:07.948 4388 Recovering log #39
+2026/04/17-21:47:08.022 4388 Reusing old log C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT - copia\whatsapp_session\EBWebView\Default\IndexedDB\https_web.whatsapp.com_0.indexeddb.leveldb/000039.log 
+2026/04/17-21:47:08.023 4388 Delete type=2 #36
+2026/04/17-21:47:08.023 4388 Delete type=2 #37
+2026/04/17-21:47:08.023 4388 Delete type=2 #40
+2026/04/17-21:51:10.628 4388 Level-0 table #45: started
+2026/04/17-21:51:10.667 4388 Level-0 table #45: 1165118 bytes OK
+2026/04/17-21:51:10.670 4388 Delete type=0 #39
+2026/04/17-21:51:17.166 4388 Compacting 1@1 + 2@2 files
+2026/04/17-21:51:17.272 4388 Generated table #46@1: 51340 keys, 2240901 bytes
+2026/04/17-21:51:17.297 4388 Generated table #47@1: 11692 keys, 633979 bytes
+2026/04/17-21:51:17.297 4388 Compacted 1@1 + 2@2 files => 2874880 bytes
+2026/04/17-21:51:17.298 4388 compacted to: files[ 0 0 2 0 0 0 0 ]
+2026/04/17-21:51:17.299 4388 Delete type=2 #41
+2026/04/17-21:51:17.299 4388 Delete type=2 #42
+2026/04/17-21:51:17.299 4388 Delete type=2 #45

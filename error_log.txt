@@ -14699,3 +14699,150 @@ AttributeError: 'AdminFrame' object has no attribute 'find_pos_printer'
 2026-04-15 21:42:21,429 - INFO - Text: Provider: sdl2
 2026-04-15 21:42:23,600 - WARNING - stderr: C:\Users\DAVIS\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\requests\__init__.py:113: RequestsDependencyWarning: urllib3 (2.6.3) or chardet (7.4.2)/charset_normalizer (3.4.4) doesn't match a supported version!
 2026-04-15 21:42:23,601 - WARNING - stderr:   warnings.warn(
+2026-04-16 21:29:08,035 - ERROR - Error de ejecución DB: Error binding parameter 3: type 'MagicMock' is not supported - Query: INSERT INTO caja_sesiones (usuario_id, inicio, inicial, monto_apertura, estado) VALUES (?,?,?,?,?)
+Traceback (most recent call last):
+  File "c:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT - copia\main_app.py", line 480, in execute
+    cur.execute(query, params)
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^
+sqlite3.ProgrammingError: Error binding parameter 3: type 'MagicMock' is not supported
+2026-04-16 21:29:08,039 - ERROR - Error al abrir caja: Error binding parameter 3: type 'MagicMock' is not supported
+Traceback (most recent call last):
+  File "c:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT - copia\main_app.py", line 1256, in open_caja
+    cur = self.db.execute('INSERT INTO caja_sesiones (usuario_id, inicio, inicial, monto_apertura, estado) VALUES (?,?,?,?,?)',
+                        (usuario_id, inicio, inicial, inicial, 'ABIERTO'))
+  File "c:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT - copia\main_app.py", line 480, in execute
+    cur.execute(query, params)
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^
+sqlite3.ProgrammingError: Error binding parameter 3: type 'MagicMock' is not supported
+2026-04-16 21:29:08,040 - ERROR - Excepción no capturada
+Traceback (most recent call last):
+  File "C:\Users\DAVIS\.gemini\antigravity\brain\78c4f712-95ea-4c4b-a15b-59b8306c566a\scratch\simulate_app.py", line 102, in <module>
+    run_simulation()
+    ~~~~~~~~~~~~~~^^
+  File "C:\Users\DAVIS\.gemini\antigravity\brain\78c4f712-95ea-4c4b-a15b-59b8306c566a\scratch\simulate_app.py", line 33, in run_simulation
+    pos.update_cart_display()
+    ~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "c:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT - copia\main_app.py", line 1183, in update_cart_display
+    self.cart_list.insert('end', f"{p[1]:<20} ${p[2]:>6.2f}")
+                                    ~^^^
+KeyError: 1
+2026-04-16 21:30:36,249 - ERROR - Excepción no capturada
+Traceback (most recent call last):
+  File "C:\Users\DAVIS\.gemini\antigravity\brain\78c4f712-95ea-4c4b-a15b-59b8306c566a\scratch\simulate_app.py", line 103, in <module>
+    run_simulation()
+    ~~~~~~~~~~~~~~^^
+  File "C:\Users\DAVIS\.gemini\antigravity\brain\78c4f712-95ea-4c4b-a15b-59b8306c566a\scratch\simulate_app.py", line 43, in run_simulation
+    mesero.table_var.set("Mesa 1")
+    ^^^^^^^^^^^^^^^^
+AttributeError: 'MeseroFrame' object has no attribute 'table_var'
+2026-04-16 21:34:44,705 - ERROR - Excepción no capturada
+Traceback (most recent call last):
+  File "C:\Users\DAVIS\.gemini\antigravity\brain\78c4f712-95ea-4c4b-a15b-59b8306c566a\scratch\simulate_app.py", line 103, in <module>
+    run_simulation()
+    ~~~~~~~~~~~~~~^^
+  File "C:\Users\DAVIS\.gemini\antigravity\brain\78c4f712-95ea-4c4b-a15b-59b8306c566a\scratch\simulate_app.py", line 46, in run_simulation
+    mesero.send_order()
+    ^^^^^^^^^^^^^^^^^
+AttributeError: 'MeseroFrame' object has no attribute 'send_order'
+2026-04-16 21:36:28,324 - ERROR - Excepción no capturada
+Traceback (most recent call last):
+  File "C:\Users\DAVIS\.gemini\antigravity\brain\78c4f712-95ea-4c4b-a15b-59b8306c566a\scratch\simulate_app.py", line 103, in <module>
+    run_simulation()
+    ~~~~~~~~~~~~~~^^
+  File "C:\Users\DAVIS\.gemini\antigravity\brain\78c4f712-95ea-4c4b-a15b-59b8306c566a\scratch\simulate_app.py", line 51, in run_simulation
+    kds.refresh_orders()
+    ^^^^^^^^^^^^^^^^^^
+AttributeError: 'KDSFrame' object has no attribute 'refresh_orders'
+2026-04-16 21:37:49,060 - ERROR - Excepción no capturada
+Traceback (most recent call last):
+  File "C:\Users\DAVIS\.gemini\antigravity\brain\78c4f712-95ea-4c4b-a15b-59b8306c566a\scratch\simulate_app.py", line 103, in <module>
+    run_simulation()
+    ~~~~~~~~~~~~~~^^
+  File "C:\Users\DAVIS\.gemini\antigravity\brain\78c4f712-95ea-4c4b-a15b-59b8306c566a\scratch\simulate_app.py", line 79, in run_simulation
+    admin = main_app.AdminFrame(root, db, user=user_data)
+  File "c:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT - copia\main_app.py", line 1864, in __init__
+    super().__init__(parent, bg=BG, highlightthickness=0, *args, **kwargs)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DAVIS\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\ttkbootstrap\style.py", line 5516, in __init__wrapper
+    func(self, *args, **kwargs)
+    ~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.3568.0_x64__qbz5n2kfra8p0\Lib\tkinter\__init__.py", line 2907, in __init__
+    Widget.__init__(self, master, 'canvas', cnf, kw)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.3568.0_x64__qbz5n2kfra8p0\Lib\tkinter\__init__.py", line 2791, in __init__
+    self.tk.call(
+    ~~~~~~~~~~~~^
+        (widgetName, self._w) + extra + self._options(cnf))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_tkinter.TclError: unknown option "-user"
+2026-04-16 21:41:41,303 - ERROR - Error al refrescar seguridad: 'AdminFrame' object has no attribute 'lbl_failed'
+2026-04-16 21:46:57,682 - ERROR - Error al refrescar seguridad: 'AdminFrame' object has no attribute 'lbl_failed'
+2026-04-17 20:54:53,901 - ERROR - Error al refrescar seguridad: 'AdminFrame' object has no attribute 'lbl_failed'
+2026-04-17 21:34:18,837 - ERROR - Error al refrescar seguridad: 'AdminFrame' object has no attribute 'lbl_failed'
+2026-04-17 22:12:38,820 - ERROR - Excepción en callback de Tkinter
+Traceback (most recent call last):
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.3568.0_x64__qbz5n2kfra8p0\Lib\tkinter\__init__.py", line 2079, in __call__
+    return self.func(*args)
+           ~~~~~~~~~^^^^^^^
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT - copia\main_app.py", line 3054, in <lambda>
+    home.tag_bind(tag, "<Button-1>", lambda e, c=cmd: c())
+                                                      ~^^
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT - copia\main_app.py", line 3103, in open_kds
+    idx, frame = self._get_or_create_tab('Cocina (KDS)', KDSFrame)
+                 ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT - copia\main_app.py", line 3121, in _get_or_create_tab
+    frame = frame_class(self.notebook, self.db, user=self.user)
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT - copia\main_app.py", line 1653, in __init__
+    self.refresh()
+    ~~~~~~~~~~~~^^
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT - copia\main_app.py", line 1678, in refresh
+    self._create_card(r)
+    ~~~~~~~~~~~~~~~~~^^^
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT - copia\main_app.py", line 1710, in _create_card
+    card_frame = ttk.LabelFrame(self.scrollable_frame, text=f"Pedido #{pid} | {mesa_info}", bootstyle="default", padding=15)
+  File "C:\Users\DAVIS\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\ttkbootstrap\style.py", line 5516, in __init__wrapper
+    func(self, *args, **kwargs)
+    ~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.3568.0_x64__qbz5n2kfra8p0\Lib\tkinter\__init__.py", line 4786, in __init__
+    Widget.__init__(self, master, 'labelframe', cnf, kw)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.3568.0_x64__qbz5n2kfra8p0\Lib\tkinter\__init__.py", line 2791, in __init__
+    self.tk.call(
+    ~~~~~~~~~~~~^
+        (widgetName, self._w) + extra + self._options(cnf))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_tkinter.TclError: unknown option "-bootstyle"
+2026-04-17 22:12:42,736 - ERROR - Excepción en callback de Tkinter
+Traceback (most recent call last):
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.3568.0_x64__qbz5n2kfra8p0\Lib\tkinter\__init__.py", line 2079, in __call__
+    return self.func(*args)
+           ~~~~~~~~~^^^^^^^
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT - copia\main_app.py", line 3054, in <lambda>
+    home.tag_bind(tag, "<Button-1>", lambda e, c=cmd: c())
+                                                      ~^^
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT - copia\main_app.py", line 3103, in open_kds
+    idx, frame = self._get_or_create_tab('Cocina (KDS)', KDSFrame)
+                 ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT - copia\main_app.py", line 3121, in _get_or_create_tab
+    frame = frame_class(self.notebook, self.db, user=self.user)
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT - copia\main_app.py", line 1653, in __init__
+    self.refresh()
+    ~~~~~~~~~~~~^^
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT - copia\main_app.py", line 1678, in refresh
+    self._create_card(r)
+    ~~~~~~~~~~~~~~~~~^^^
+  File "C:\Users\DAVIS\Desktop\PIK'TA_SOFT_FACT - copia\main_app.py", line 1710, in _create_card
+    card_frame = ttk.LabelFrame(self.scrollable_frame, text=f"Pedido #{pid} | {mesa_info}", bootstyle="default", padding=15)
+  File "C:\Users\DAVIS\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\ttkbootstrap\style.py", line 5516, in __init__wrapper
+    func(self, *args, **kwargs)
+    ~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.3568.0_x64__qbz5n2kfra8p0\Lib\tkinter\__init__.py", line 4786, in __init__
+    Widget.__init__(self, master, 'labelframe', cnf, kw)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.3568.0_x64__qbz5n2kfra8p0\Lib\tkinter\__init__.py", line 2791, in __init__
+    self.tk.call(
+    ~~~~~~~~~~~~^
+        (widgetName, self._w) + extra + self._options(cnf))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_tkinter.TclError: unknown option "-bootstyle"
+2026-04-17 23:00:29,382 - ERROR - Error al refrescar seguridad: 'AdminFrame' object has no attribute 'lbl_failed'

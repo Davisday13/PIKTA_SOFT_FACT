@@ -38,35 +38,62 @@ import time
 import winsound
 import shutil
 import re
+try:
+    import win32print
+    import win32api
+    WIN32_PRINT_AVAILABLE = True
+except ImportError:
+    WIN32_PRINT_AVAILABLE = False
+
+# =============================================================================
+# FUNCIONES DE IMPRESIÓN Y HARDWARE
+# =============================================================================
+
+def find_pos_printer():
+    """Busca automáticamente una impresora térmica USB conectada."""
+    if not WIN32_PRINT_AVAILABLE: return None
+    try:
+        # 1. Intentar con la impresora por defecto
+        default = win32print.GetDefaultPrinter()
+        # 2. Si no es obvia, buscar una que diga POS, Thermal o 80
+        printers = win32print.EnumPrinters(win32print.PRINTER_ENUM_LOCAL | win32print.PRINTER_ENUM_CONNECTIONS)
+        for flags, description, name, comment in printers:
+            n = name.upper()
+            if "POS" in n or "THERMAL" in n or "80MM" in n or "58MM" in n or "XP-80" in n:
+                return name
+        return default
+    except:
+        return None
 
 # =============================================================================
 # FUNCIONES DE SONIDO Y NOTIFICACIÓN
 # =============================================================================
 
+def play_sound_startup():
+    """Sonido de bienvenida al iniciar la app."""
+    try:
+        winsound.PlaySound('SystemAsterisk', winsound.SND_ALIAS | winsound.SND_ASYNC)
+    except:
+        pass
+
 def play_sound_error():
     """Sonido para errores del sistema."""
     try:
-        winsound.MessageBeep(winsound.MB_ICONHAND)
+        winsound.PlaySound('SystemHand', winsound.SND_ALIAS | winsound.SND_ASYNC)
     except:
         pass
 
 def play_sound_new_order():
     """Sonido suave para nuevos pedidos entrantes."""
     try:
-        winsound.Beep(800, 300)
-        winsound.Beep(1000, 300)
+        winsound.PlaySound('SystemExclamation', winsound.SND_ALIAS | winsound.SND_ASYNC)
     except:
         pass
 
 def play_sound_order_ready():
     """Sonido fuerte de campanas para cuando un pedido está listo."""
     try:
-        # Simulación de campana con frecuencias altas y decrecientes
-        for _ in range(2):
-            winsound.Beep(2500, 150)
-            winsound.Beep(2000, 150)
-            winsound.Beep(1500, 150)
-            time.sleep(0.1)
+        winsound.PlaySound('SystemDefault', winsound.SND_ALIAS | winsound.SND_ASYNC)
     except:
         pass
 
@@ -1262,37 +1289,84 @@ class POSFrame(tk.Canvas):
             messagebox.showerror('Error', 'No se pudo abrir la caja')
 
     def cerrar_caja(self):
-        """Finaliza la sesión de caja, calcula totales y muestra reporte."""
+        """Finaliza la sesión de caja, calcula totales, muestra reporte y lo imprime."""
         if not self.session_id:
             messagebox.showwarning('Caja', 'No hay sesión de caja abierta')
             return
         
         cierre_at = datetime.now().isoformat()
         # Obtener todas las ventas realizadas en esta sesión
-        rows = self.db.fetch_all('SELECT id, numero, total, items FROM pedidos WHERE sesion_id = ? AND canal = ?', (self.session_id, 'CAJA'))
-        sum_total = sum(float(r[2] or 0) for r in rows)
+        rows = self.db.fetch_all('SELECT numero, total, created_at FROM pedidos WHERE sesion_id = ? AND canal = ?', (self.session_id, 'CAJA'))
+        sum_total = sum(float(r[1] or 0) for r in rows)
 
         # Obtener monto inicial
         caja_row = self.db.fetch_one('SELECT inicial FROM caja_sesiones WHERE id = ?', (self.session_id,)) or (0.0,)
         inicial = float(caja_row[0] or 0)
         
+        # Generar formato de Ticket idéntico al solicitado
+        ahora = datetime.now()
+        fecha_str = ahora.strftime('%d/%m/%Y %H:%M:%S')
+        user_name = self.user.get('username', 'Cajero')
+        user_id = self.user.get('id', 0)
+        
+        lines = []
+        lines.append("*" * 42)
+        lines.append("      INFORME DE CIERRE DE CAJA       ")
+        lines.append("*" * 42)
+        lines.append(f"Cierre:  {fecha_str}")
+        lines.append(f"Cajero:  ID {user_id} - {user_name}")
+        lines.append(f"Caja:    1")
+        lines.append(f"Sesión:  {self.session_id}")
+        lines.append("-" * 42)
+        lines.append(f"{'TICKET':<15} {'FECHA':<20} {'TOTAL':>5}")
+        lines.append("-" * 42)
+        
+        for r in rows:
+            numero = r[0]
+            total = float(r[1] or 0)
+            try:
+                t_str = datetime.fromisoformat(r[2]).strftime('%H:%M:%S')
+            except:
+                t_str = "00:00:00"
+            lines.append(f"{numero:<15} {t_str:<20} {total:>5.2f}")
+            
+        lines.append("-" * 42)
+        lines.append(f"{'Total EFECTIVO':<36} {sum_total:>5.2f}")
+        lines.append("=" * 42)
+        lines.append(f"{'Monto Inicial:':<36} {inicial:>5.2f}")
+        lines.append(f"{'Total Ventas Turno:':<36} {sum_total:>5.2f}")
+        lines.append("-" * 42)
+        lines.append(f"{'TOTAL EN CAJA:':<36} {sum_total + inicial:>5.2f}")
+        lines.append("=" * 42)
+        lines.append(f"{'Nº Total de Tickets:':<36} {len(rows):>5}")
+        lines.append("*" * 42)
+        lines.append("      SISTEMA POS PIK'TA - 2026       ")
+        lines.append("*" * 42)
+        
+        reporte_texto = "\n".join(lines)
+        
         try:
-            # Actualizar estado de la sesión a CERRADO
-            self.db.execute('UPDATE caja_sesiones SET estado = ?, cierre_total = ?, cierre_at = ? WHERE id = ?', 
-                            ('CERRADO', sum_total, cierre_at, self.session_id))
+            self.db._ensure_column('caja_sesiones', 'reporte_texto', 'TEXT')
+            # Actualizar estado de la sesión a CERRADO y guardar reporte
+            self.db.execute('UPDATE caja_sesiones SET estado = ?, cierre_total = ?, cierre_at = ?, reporte_texto = ? WHERE id = ?', 
+                            ('CERRADO', sum_total, cierre_at, reporte_texto, self.session_id))
             messagebox.showinfo('Caja', 'Caja cerrada exitosamente')
-        except Exception:
-            logging.exception('Error al cerrar caja')
+            
+            # Mandar a imprimir el reporte automáticamente
+            if sys.platform == "win32":
+                import tempfile
+                fd, path = tempfile.mkstemp(suffix=".txt")
+                with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                    f.write(reporte_texto)
+                os.startfile(path, "print")
+                
+        except Exception as e:
+            logging.exception('Error al cerrar caja o imprimir ticket')
+            messagebox.showerror('Error', f'Ocurrió un error: {str(e)}')
 
         # Mostrar reporte de cierre en la interfaz
-        reporte = f"CIERRE DE CAJA ID: {self.session_id}\n"
-        reporte += f"Total Ventas: ${sum_total:.2f}\n"
-        reporte += f"Monto Inicial: ${inicial:.2f}\n"
-        reporte += f"Total en Caja: ${sum_total + inicial:.2f}"
-        
-        self.show_report(reporte)
+        self.show_report(reporte_texto)
         self.session_id = None
-        # Eliminar llamada duplicada a show_report
 
     def show_report(self, text):
         """Muestra una pantalla con el resumen del cierre de caja."""
@@ -1561,6 +1635,7 @@ class KDSFrame(tk.Canvas):
         self.db = db
         self.user = user
         self.last_order_count = 0
+        self.cards = {} # {order_id: dict_of_widgets}
         
         # Logo de Fondo en KDS
         bg_logo_path = os.path.join('Imagenes', 'pikta2.png')
@@ -1601,120 +1676,205 @@ class KDSFrame(tk.Canvas):
         ttk.Button(self.header, text='Regresar', command=lambda: self.master.select(0), bootstyle="secondary-outline", cursor="hand2", padding=10).pack(side='right', padx=5)
         ttk.Button(self.header, text='Refrescar', command=self.refresh, bootstyle="light-outline", cursor="hand2", padding=10).pack(side='right', padx=5)
         
-        # --- Instrucciones ---
-        instr = ttk.Label(self.body, text="ENTER: Iniciar Preparación / Marcar como Finalizado", font=(None, 10, 'italic'), bootstyle="secondary")
-        instr.pack(pady=2)
+        # --- Contenedor Principal con Scroll para las Tarjetas ---
+        self.canvas = tk.Canvas(self.body, bg=BG, highlightthickness=0)
+        self.scrollbar = ttk.Scrollbar(self.body, orient="vertical", command=self.canvas.yview)
+        self.scrollable_frame = ttk.Frame(self.canvas)
 
-        # --- Lista de Pedidos en el cuerpo ---
-        self.listbox = tk.Listbox(self.body, bg=PANEL, fg=FG, font=(None, 14), bd=0, highlightthickness=0, selectbackground=ACCENT, takefocus=True)
-        self.listbox.pack(fill='both', expand=True, pady=10)
-        self.listbox.bind('<Return>', lambda e: self.advance_order_state())
-        # Permitir que Tab avance el estado (evitar cambiar foco)
-        def on_tab(e):
-            self.advance_order_state()
-            return 'break'
-        self.listbox.bind('<Tab>', on_tab)
+        self.scrollable_frame.bind(
+            "<Configure>",
+            lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+        )
+
+        self.canvas_window = self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
         
-        footer = ttk.Frame(self.body)
-        footer.pack(fill='x', pady=10)
-        self.btn_action = ttk.Button(footer, text='AVANZAR ESTADO (ENTER)', command=self.advance_order_state, bootstyle="success", padding=20, cursor="hand2")
-        self.btn_action.pack(fill='x')
+        def configure_canvas(event):
+            self.canvas.itemconfig(self.canvas_window, width=event.width)
+        self.canvas.bind("<Configure>", configure_canvas)
+
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+        
+        self.scrollbar.pack(side="right", fill="y")
+        self.canvas.pack(side="left", fill="both", expand=True)
+
         self.refresh()
+        self.auto_refresh_loop()
+
+    def auto_refresh_loop(self):
+        """Ciclo automático para actualizar los temporizadores y buscar nuevos pedidos."""
+        self.refresh()
+        self.after(5000, self.auto_refresh_loop) # Actualiza cada 5 segundos
 
     def refresh(self):
-        """Consulta la base de datos y actualiza la lista de pedidos activos."""
-        self.listbox.delete(0, 'end')
+        """Consulta la base de datos y actualiza o crea las tarjetas de los pedidos."""
         # Traer pedidos que NO tengan estado 'LISTO'
-        rows = self.db.fetch_all("SELECT id, numero, items, estado, mesa, preparacion_inicio, preparacion_duracion FROM pedidos WHERE estado NOT IN ('LISTO', 'CANCELADO') ORDER BY id DESC LIMIT 50")
+        rows = self.db.fetch_all("SELECT id, numero, items, estado, mesa, preparacion_inicio, preparacion_duracion FROM pedidos WHERE estado NOT IN ('LISTO', 'CANCELADO') ORDER BY id ASC LIMIT 50")
         
         # Reproducir sonido si hay pedidos nuevos
         if len(rows) > self.last_order_count:
             play_sound_new_order()
         self.last_order_count = len(rows)
         
+        current_ids = set()
+        
         for r in rows:
-            try:
-                # Parsear el JSON de items para mostrar nombres legibles
-                items_obj = json.loads(r[2]) if r[2] else []
-                item_names = ', '.join([f"{it.get('qty', 1)}x {it.get('nombre')}" for it in items_obj])
-            except:
-                item_names = r[2] or ""
+            pid = r[0]
+            current_ids.add(pid)
             
-            mesa_info = f"[{r[4]}]" if r[4] else "[CAJA]"
-            estado = r[3]
-            prep_start = r[5]
-            time_info = ""
-            if estado == 'PREPARANDO' and prep_start:
+            if pid not in self.cards:
+                self._create_card(r)
+            else:
+                self._update_card(pid, r)
+                
+        # Limpiar tarjetas de pedidos que ya no están (ej. pasaron a LISTO)
+        for pid in list(self.cards.keys()):
+            if pid not in current_ids:
+                self.cards[pid]['frame'].destroy()
+                del self.cards[pid]
+                
+        # Reposicionar tarjetas en forma de Grid (Mosaico) para que sean más pequeñas
+        col_count = 3 # Mostrar 3 tarjetas por fila
+        sorted_pids = sorted(list(current_ids))
+        for i, pid in enumerate(sorted_pids):
+            row = i // col_count
+            col = i % col_count
+            self.cards[pid]['frame'].grid(row=row, column=col, padx=15, pady=15, sticky='nw')
+
+    def _create_card(self, r):
+        pid, numero, items_str, estado, mesa, prep_start, prep_dur = r
+        
+        # Parse items
+        try:
+            items_obj = json.loads(items_str) if items_str else []
+            item_names = '\n'.join([f"• {it.get('qty', 1)}x {it.get('nombre')}" for it in items_obj])
+        except:
+            item_names = items_str or "Sin detalles"
+            
+        mesa_info = f"MESA: {mesa}" if mesa else "PARA LLEVAR / CAJA"
+        
+        # Usamos Frame normal para evitar errores de bootstyle en LabelFrame
+        card_frame = ttk.Frame(self.scrollable_frame, bootstyle="secondary", padding=15)
+        
+        # Cabecera de la tarjeta
+        header = ttk.Frame(card_frame, bootstyle="secondary")
+        header.pack(fill='x', pady=(0, 10))
+        
+        lbl_title = ttk.Label(header, text=f"Pedido #{pid} | {mesa_info}", font=(None, 14, 'bold'), bootstyle="inverse-secondary")
+        lbl_title.pack(side='left', fill='x', expand=True)
+        
+        lbl_timer = ttk.Label(header, text="", font=(None, 12, 'bold'), bootstyle="inverse-secondary")
+        lbl_timer.pack(side='right', padx=(10, 0))
+        
+        # Separador visual
+        ttk.Separator(card_frame).pack(fill='x', pady=5)
+        
+        # Cuerpo de la tarjeta (Items)
+        lbl_items = ttk.Label(card_frame, text=item_names, font=(None, 12), justify="left", wraplength=280, bootstyle="inverse-secondary")
+        lbl_items.pack(anchor='w', pady=5)
+        
+        # Botón de acción (Más pequeño y discreto)
+        btn_action = ttk.Button(card_frame, padding=8, cursor="hand2")
+        btn_action.pack(fill='x', pady=(10, 0))
+        
+        # Guardar referencias
+        self.cards[pid] = {
+            'frame': card_frame,
+            'header': header,
+            'lbl_title': lbl_title,
+            'lbl_timer': lbl_timer,
+            'lbl_items': lbl_items,
+            'btn_action': btn_action
+        }
+        
+        self._update_card(pid, r)
+
+    def _update_card(self, pid, r):
+        """Actualiza la apariencia y el temporizador de una tarjeta existente."""
+        _, numero, items_str, estado, mesa, prep_start, prep_dur = r
+        widgets = self.cards[pid]
+        
+        time_info = ""
+        btn_text = ""
+        btn_style = ""
+        btn_cmd = None
+        
+        # En lugar de colorear toda la tarjeta, solo coloreamos la cabecera y el texto
+        # para que no sea tan "escandaloso"
+        header_style = "secondary"
+
+        if estado == 'RECIBIDO':
+            header_style = "info" # Celeste suave para la cabecera
+            time_info = "Esperando..."
+            btn_text = "▶ INICIAR PREPARACIÓN"
+            btn_style = "info-outline"
+            btn_cmd = lambda: self._advance_single_order(pid, 'RECIBIDO', prep_dur)
+            
+        elif estado == 'PREPARANDO':
+            header_style = "warning" # Amarillo suave para la cabecera
+            btn_text = "✔ EN PREPARACIÓN - FINALIZAR"
+            btn_style = "warning-outline"
+            btn_cmd = lambda: self._advance_single_order(pid, 'PREPARANDO', prep_dur)
+            
+            if prep_start:
                 try:
                     started = datetime.fromisoformat(prep_start)
                     elapsed = datetime.now() - started
-                    # usar duración específica del pedido si está definida
-                    dur_min = r[6] if len(r) > 6 and r[6] is not None else int(PREP_DURATION.total_seconds()//60)
+                    dur_min = prep_dur if prep_dur is not None else int(PREP_DURATION.total_seconds()//60)
                     remaining = timedelta(minutes=dur_min) - elapsed
+                    
                     if remaining.total_seconds() <= 0:
-                        time_info = ' (casi listo)'
+                        time_info = "¡TIEMPO AGOTADO!"
+                        header_style = "danger"
+                        btn_style = "danger-outline"
                     else:
                         mins = int(remaining.total_seconds() // 60)
                         secs = int(remaining.total_seconds() % 60)
-                        time_info = f" ({mins}m{secs}s restantes)"
-                except Exception:
-                    time_info = ''
+                        time_info = f"⏳ Quedan: {mins}m {secs}s"
+                except:
+                    time_info = "Error de tiempo"
 
-            # Formato visual mejorado para mostrar el estado actual y tiempo
-            self.listbox.insert('end', f" #{r[0]:<5} | {mesa_info:<10} | {estado:<15}{time_info} | {item_names}")
-            
-            # Colorear según estado
-            idx = self.listbox.size() - 1
-            if estado == 'PREPARANDO':
-                self.listbox.itemconfig(idx, fg='#f0ad4e') # Naranja/Amarillo
-            elif estado == 'RECIBIDO':
-                self.listbox.itemconfig(idx, fg='#5bc0de') # Azul
+        # Aplicar colores sutiles
+        # Mantenemos el fondo de la tarjeta en secondary (oscuro normal)
+        widgets['frame'].config(bootstyle="secondary")
+        widgets['header'].config(bootstyle=header_style)
+        widgets['lbl_title'].config(bootstyle=f"inverse-{header_style}")
+        widgets['lbl_timer'].config(text=time_info, bootstyle=f"inverse-{header_style}")
+        
+        # Asegurarse de que el texto interior use el mismo color base oscuro
+        widgets['lbl_items'].config(bootstyle="inverse-secondary")
+        
+        # Botón
+        widgets['btn_action'].config(text=btn_text, bootstyle=btn_style, command=btn_cmd)
 
-    def advance_order_state(self):
-        """Avanza el pedido por los estados: RECIBIDO -> PREPARANDO -> LISTO."""
+    def _advance_single_order(self, pid, current_state, prep_dur):
+        """Avanza un pedido individual a su siguiente estado."""
         try:
-            sel = self.listbox.curselection()
-            if not sel: 
-                # Si no hay selección pero hay elementos, seleccionar el primero
-                if self.listbox.size() > 0:
-                    self.listbox.selection_set(0)
-                    self.listbox.activate(0)
-                    sel = (0,)
-                else:
-                    return
-                
-            index = sel[0]
-            text = self.listbox.get(index)
-            
-            import re
-            match = re.search(r'#(\d+)', text)
-            if not match: return
-            pid = int(match.group(1))
+            # Prevenir doble clic rápido (Debounce)
+            if pid in self.cards:
+                self.cards[pid]['btn_action'].config(state='disabled')
+                # Rehabilitar después de 1 segundo si la tarjeta aún existe
+                self.after(1000, lambda p=pid: self.cards[p]['btn_action'].config(state='normal') if p in self.cards else None)
 
-            # Obtener estado actual directamente de la base de datos
-            res = self.db.fetch_one("SELECT estado, preparacion_inicio, preparacion_duracion, numero FROM pedidos WHERE id=?", (pid,))
+            res = self.db.fetch_one("SELECT numero, estado FROM pedidos WHERE id=?", (pid,))
             if not res: return
-            current_state = res[0]
-            prep_start = res[1]
-            prep_dur = res[2]
-            numero = res[3]
+            numero = res[0]
+            actual_state = res[1]
 
-            if current_state == 'RECIBIDO':
+            # Solo avanzar si el estado en la BD coincide (evita saltos por clics acumulados)
+            if current_state == 'RECIBIDO' and actual_state == 'RECIBIDO':
                 new_state = 'PREPARANDO'
                 started_at = datetime.now().isoformat()
-                # Asegurar duración de preparación en el pedido
                 default_min = int(PREP_DURATION.total_seconds() // 60)
                 dur_val = prep_dur if prep_dur is not None else default_min
                 self.db.execute('UPDATE pedidos SET estado=?, preparacion_inicio=?, preparacion_duracion=? WHERE id=?', (new_state, started_at, dur_val, pid))
-            elif current_state == 'PREPARANDO':
+            
+            elif current_state == 'PREPARANDO' and actual_state == 'PREPARANDO':
                 new_state = 'LISTO'
                 self.db.execute('UPDATE pedidos SET estado=? WHERE id=?', (new_state, pid))
-                # Al finalizar, reproducir sonido fuerte y notificar POS
-                try:
-                    play_sound_order_ready()
-                except:
-                    pass
-                # Intentar notificar la pestaña POS (si existe) para refrescar y alertar
+                try: play_sound_order_ready()
+                except: pass
+                
+                # Notificar al POS
                 try:
                     app = self.winfo_toplevel()
                     if hasattr(app, 'notebook'):
@@ -1724,38 +1884,24 @@ class KDSFrame(tk.Canvas):
                                 if hasattr(pos_frame, 'refresh_unpaid_orders'):
                                     pos_frame.refresh_unpaid_orders()
                                     if hasattr(pos_frame, 'notify_order_ready'):
-                                        try:
-                                            pos_frame.notify_order_ready(f'Pedido Listo: {numero}')
-                                        except:
-                                            pass
-                                    # Reproducir un sonido de notificación en POS
-                                    try:
-                                        play_sound_new_order()
-                                    except:
-                                        pass
+                                        try: pos_frame.notify_order_ready(f'Pedido Listo: {numero}')
+                                        except: pass
+                                    try: play_sound_new_order()
+                                    except: pass
                                 break
-                except Exception:
-                    logging.exception('Error notificando POS sobre pedido listo')
-            else:
-                return 
+                except Exception as e:
+                    logging.exception('Error notificando POS: ' + str(e))
             
-            # Actualizar la lista inmediatamente
             self.refresh()
-            
-            # Mantener el foco y selección en la misma posición o la última disponible
-            if self.listbox.size() > 0:
-                new_idx = min(index, self.listbox.size() - 1)
-                self.listbox.selection_set(new_idx)
-                self.listbox.activate(new_idx)
-                self.listbox.focus_set()
-                
         except Exception as e:
-            logging.error(f"Error en KDS advance_order_state: {str(e)}")
+            logging.error(f"Error en _advance_single_order: {e}")
             play_sound_error()
 
+    def advance_order_state(self):
+        pass
+
     def mark_ready(self):
-        """Mantenemos por compatibilidad con el manejador global de ENTER."""
-        self.advance_order_state()
+        pass
 
 class WhatsAppFrame(tk.Canvas):
     """
@@ -1861,6 +2007,7 @@ class AdminFrame(tk.Canvas):
     Permite gestionar el inventario, usuarios y seguridad.
     """
     def __init__(self, parent, db: DatabaseManager, *args, **kwargs):
+        user = kwargs.pop('user', None)
         super().__init__(parent, bg=BG, highlightthickness=0, *args, **kwargs)
         self.db = db
         
@@ -1941,6 +2088,11 @@ class AdminFrame(tk.Canvas):
         self.notebook.add(self.products_frame, text='Menú / Productos')
         self.setup_menu()
 
+        # 6. Pestaña de Historial de Cierres
+        self.cierre_history_frame = ttk.Frame(self.notebook, padding=20)
+        self.notebook.add(self.cierre_history_frame, text='Historial de Cierres')
+        self.setup_cierre_history()
+
         self.show_admin_menu() # Mostrar el menú de cuadritos al inicio
 
     def setup_admin_menu(self):
@@ -2009,6 +2161,10 @@ class AdminFrame(tk.Canvas):
         c4.grid(row=0, column=3, padx=20, pady=20)
         admin_cards.append(c4)
 
+        c5 = make_admin_card(cards_wrap, 'efectivo.jpeg', 'Cierres de Caja', 'Historial de reportes de cierre.', lambda: self.open_section(5, "HISTORIAL DE CIERRES"))
+        c5.grid(row=1, column=0, padx=20, pady=20)
+        admin_cards.append(c5)
+
         # Navegación por flechas para las tarjetas de Admin (Fila de 4)
         def nav_admin(idx, e):
             if e.keysym == 'Left' and idx > 0: admin_cards[idx-1].focus_set()
@@ -2019,6 +2175,9 @@ class AdminFrame(tk.Canvas):
             card.bind("<Right>", lambda e, idx=i: nav_admin(idx, e))
 
         for i in range(4): cards_wrap.columnconfigure(i, weight=1)
+
+        # Agregar herramientas avanzadas abajo
+        self.setup_admin_tools(self.menu_frame)
 
     def open_section(self, index, title):
         """Abre una sección específica y actualiza la cabecera."""
@@ -2043,6 +2202,7 @@ class AdminFrame(tk.Canvas):
             elif idx == 2: self.refresh_users()
             elif idx == 3: self.refresh_security()
             elif idx == 4: self.refresh_menu()
+            elif idx == 5: self.refresh_cierres()
         except: pass
 
     def setup_inventory(self):
@@ -2129,10 +2289,7 @@ class AdminFrame(tk.Canvas):
         
         ttk.Button(form, text='CREAR USUARIO', command=self.create_user, bootstyle="success").pack(pady=10)
 
-    def refresh(self):
-        """Refresca todas las sub-secciones del panel admin."""
-        self.refresh_inventory()
-        self.refresh_users()
+
         self.refresh_security()
 
     def setup_security(self):
@@ -2153,6 +2310,9 @@ class AdminFrame(tk.Canvas):
         
         btn_backup = ttk.Button(m_inner, text="💾 Generar Respaldo DB", command=self.manual_backup, bootstyle="success", padding=10)
         btn_backup.grid(row=0, column=2, padx=30)
+        
+        btn_test_print = ttk.Button(m_inner, text="🖨 Probar Impresora/Cajón", command=self.test_printer, bootstyle="info", padding=10)
+        btn_test_print.grid(row=0, column=3, padx=30)
 
         # --- Tabla de Auditoría ---
         ttk.Label(self.security_frame, text="Historial de Auditoría (Últimas Actividades)", font=(None, 16, 'bold')).pack(anchor='w', pady=15)
@@ -2174,6 +2334,215 @@ class AdminFrame(tk.Canvas):
             messagebox.showinfo("Backup Exitoso", f"Copia de seguridad creada en:\n{path}")
         else:
             messagebox.showerror("Error", "No se pudo crear la copia de seguridad")
+
+    def test_printer(self):
+        """Realiza una prueba de impresión y apertura de cajón."""
+        printer_name = find_pos_printer()
+        if not printer_name:
+            messagebox.showerror("Error", "No se detectó ninguna impresora térmica POS instalada.")
+            return
+            
+        confirm = messagebox.askyesno("Prueba", f"¿Desea probar la impresora:\n{printer_name}?\n\nSe enviará un ticket de prueba y se abrirá el cajón.")
+        if not confirm: return
+        
+        test_text = """
+    ====================================
+    *       PRUEBA DE IMPRESION        *
+    *         PIK'TA SOFT              *
+    ====================================
+    FECHA:       {}
+    ESTADO:      CORRECTO
+    ------------------------------------
+    SISTEMA OPERATIVO: {}
+    IMPRESORA DETECTADA:
+    {}
+    ------------------------------------
+    ¡PRUEBA EXITOSA!
+    ====================================
+    
+    
+    
+    """.format(datetime.now().strftime('%d/%m/%Y %H:%M:%S'), sys.platform, printer_name)
+        
+        # 1. Abrir Cajón
+        try:
+            hPrinter = win32print.OpenPrinter(printer_name)
+            raw_data = b'\x1b\x70\x00\x19\xfa'
+            win32print.StartDocPrinter(hPrinter, 1, ("Prueba Cajon", None, "RAW"))
+            win32print.StartPagePrinter(hPrinter)
+            win32print.WritePrinter(hPrinter, raw_data)
+            win32print.EndPagePrinter(hPrinter)
+            win32print.EndDocPrinter(hPrinter)
+            win32print.ClosePrinter(hPrinter)
+        except Exception as e:
+            messagebox.showerror("Error Cajón", f"No se pudo abrir el cajón: {e}")
+            
+        # 2. Imprimir Ticket (PIL)
+        from PIL import Image, ImageDraw, ImageFont
+        img_width = 380
+        lines = test_text.split('\n')
+        img_height = 100 + (len(lines) * 25)
+        img = Image.new('RGB', (img_width, img_height), 'white')
+        draw = ImageDraw.Draw(img)
+        try:
+            font = ImageFont.truetype("arialbd.ttf", 14)
+        except:
+            font = ImageFont.load_default()
+            
+        y = 20
+        for line in lines:
+            draw.text((10, y), line, fill='black', font=font)
+            y += 25
+            
+        filename = "test_print.png"
+        img.save(filename)
+        try:
+            win32api.ShellExecute(0, "printto", filename, f'"{printer_name}"', ".", 0)
+            messagebox.showinfo("Éxito", "Prueba de impresión enviada y cajón abierto.")
+        except Exception as e:
+            import os
+            os.startfile(filename, "print")
+            messagebox.showinfo("Prueba", f"Enviado a imprimir por defecto (ShellExecute falló: {e})")
+
+    def setup_cierre_history(self):
+        """Configura la pestaña para ver el historial de cierres de caja."""
+        for w in self.cierre_history_frame.winfo_children():
+            w.destroy()
+
+        # Logo Pik'ta en la cabecera
+        logo_path = os.path.join('Imagenes', 'pikta2.png')
+        if os.path.exists(logo_path):
+            img = load_image(logo_path, size=(80, 80))
+            if img:
+                lbl = ttk.Label(self.cierre_history_frame, image=img)
+                lbl.image = img
+                lbl.pack(pady=5)
+
+        ttk.Label(self.cierre_history_frame, text="📊 HISTORIAL DE CIERRES DE CAJA", font=(None, 18, 'bold')).pack(pady=10)
+
+        main_c = ttk.Frame(self.cierre_history_frame)
+        main_c.pack(fill='both', expand=True)
+
+        # Lista de cierres (Lado Izquierdo)
+        left = ttk.Frame(main_c, width=300)
+        left.pack(side='left', fill='y', padx=10)
+
+        ttk.Label(left, text="Seleccione un Cierre:", font=(None, 11, 'bold')).pack(pady=5)
+
+        self.cierre_list = ttk.Treeview(left, columns=('ID', 'Fecha', 'Total'), show='headings', height=15)
+        self.cierre_list.heading('ID', text='ID')
+        self.cierre_list.heading('Fecha', text='Fecha')
+        self.cierre_list.heading('Total', text='Total')
+        self.cierre_list.column('ID', width=50)
+        self.cierre_list.column('Fecha', width=150)
+        self.cierre_list.column('Total', width=80)
+        self.cierre_list.pack(fill='both', expand=True)
+
+        # Vista del Reporte (Lado Derecho)
+        right = ttk.Frame(main_c)
+        right.pack(side='right', fill='both', expand=True, padx=10)
+
+        ttk.Label(right, text="Vista del Reporte:", font=(None, 11, 'bold')).pack(pady=5)
+        self.cierre_view = tk.Text(right, font=("Courier", 11), bg="#f0f0f0", state='disabled')
+        self.cierre_view.pack(fill='both', expand=True)
+
+        def on_cierre_select(e):
+            sel = self.cierre_list.selection()
+            if not sel: return
+            cid = self.cierre_list.item(sel[0])['values'][0]
+
+            res = self.db.fetch_one("SELECT reporte_texto FROM caja_sesiones WHERE id = ?", (cid,))
+            if res:
+                self.cierre_view.config(state='normal')
+                self.cierre_view.delete('1.0', 'end')
+                self.cierre_view.insert('1.0', res[0] or "Sin texto de reporte")
+                self.cierre_view.config(state='disabled')
+
+        self.cierre_list.bind('<<TreeviewSelect>>', on_cierre_select)
+
+        # Botones de Acción
+        btn_f = ttk.Frame(self.cierre_history_frame)
+        btn_f.pack(fill='x', pady=10)
+
+        ttk.Button(btn_f, text="🔄 ACTUALIZAR LISTA", command=self.refresh_cierres, bootstyle="info").pack(side='left', padx=10)
+
+        def print_historical():
+            txt = self.cierre_view.get('1.0', 'end-1c')
+            if not txt.strip():
+                messagebox.showwarning("Aviso", "Seleccione un cierre primero.")
+                return
+            
+            import os
+            temp_dir = os.path.join(os.environ.get('TEMP', 'C:\\temp'), 'PiktaInvoices')
+            if not os.path.exists(temp_dir): os.makedirs(temp_dir)
+            
+            base_name = f"cierre_historial_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+            filename = os.path.join(temp_dir, base_name)
+            with open(filename, "w", encoding="utf-8") as f:
+                f.write(txt)
+            os.startfile(filename)
+            messagebox.showinfo("Impresión", "Reporte enviado a imprimir.")
+
+        ttk.Button(btn_f, text="🖨 IMPRIMIR SELECCIONADO", command=print_historical, bootstyle="success").pack(side='left', padx=10)
+
+        self.refresh_cierres()
+
+    def refresh_cierres(self):
+        """Actualiza la lista de cierres de caja."""
+        if hasattr(self, 'cierre_list'):
+            self.cierre_list.delete(*self.cierre_list.get_children())
+            rows = self.db.fetch_all("SELECT id, cierre_at, cierre_total FROM caja_sesiones WHERE estado='CERRADO' ORDER BY id DESC")
+            for r in rows:
+                fecha = datetime.fromisoformat(r[1]).strftime('%d/%m/%Y %H:%M') if r[1] else "N/A"
+                self.cierre_list.insert('', 'end', values=(r[0], fecha, f"${r[2]:.2f}"))
+
+    def setup_admin_tools(self, parent):
+        """Herramientas especiales para el administrador con un diseño destacado."""
+        tools_frame = ttk.Frame(parent, padding=(0, 40, 0, 0))
+        tools_frame.pack(fill='x', side='bottom')
+
+        # Línea divisoria
+        ttk.Separator(tools_frame, orient='horizontal').pack(fill='x', pady=20)
+
+        ttk.Label(tools_frame, text="🛠️ Herramientas de Mantenimiento Avanzado", font=(None, 14, 'bold'), bootstyle="secondary").pack(anchor='w', padx=10, pady=(0, 15))
+        
+        btn_container = ttk.Frame(tools_frame)
+        btn_container.pack(fill='x')
+        
+        # Botones con iconos y estilos claros
+        btn_clear = ttk.Button(btn_container, text="🧹 LIMPIAR PEDIDOS (REINICIAR COCINA)", 
+                  command=self.clear_all_orders, bootstyle="danger", padding=12)
+        btn_clear.pack(side='left', padx=10)
+        
+        btn_reset = ttk.Button(btn_container, text="📦 REINICIAR INVENTARIO A CERO", 
+                  command=self.reset_inventory, bootstyle="warning", padding=12)
+        btn_reset.pack(side='left', padx=10)
+        
+        btn_backup = ttk.Button(btn_container, text="💾 CREAR RESPALDO DE SEGURIDAD (BACKUP)", 
+                  command=self.manual_backup, bootstyle="success", padding=12)
+        btn_backup.pack(side='left', padx=10)
+
+        ttk.Label(tools_frame, text="Nota: Estas acciones son irreversibles. Use con precaución.", font=(None, 9, 'italic'), bootstyle="muted").pack(anchor='w', padx=15, pady=10)
+
+    def clear_all_orders(self):
+        """Elimina todos los pedidos de la base de datos para empezar de cero."""
+        if messagebox.askyesno("Confirmar Limpieza", "¿Está seguro de eliminar TODOS los pedidos? Esta acción no se puede deshacer."):
+            try:
+                with self.db.get_connection() as conn:
+                    conn.execute("DELETE FROM pedidos")
+                messagebox.showinfo("Éxito", "Todos los pedidos han sido eliminados. La cocina está limpia.")
+            except Exception as e:
+                messagebox.showerror("Error", f"No se pudo limpiar los pedidos: {e}")
+
+    def reset_inventory(self):
+        """Reinicia los valores de inventario a cero."""
+        if messagebox.askyesno("Confirmar Reinicio", "¿Desea poner todas las existencias de inventario en cero?"):
+            try:
+                with self.db.get_connection() as conn:
+                    conn.execute("UPDATE inventario SET cantidad = 0")
+                messagebox.showinfo("Éxito", "Inventario reiniciado correctamente.")
+            except Exception as e:
+                messagebox.showerror("Error", f"No se pudo reiniciar el inventario: {e}")
 
     def refresh_security(self):
         """Actualiza las métricas y logs de seguridad."""
@@ -2468,6 +2837,8 @@ class App(ttk.Window):
         self.db = DatabaseManager()
         self.user = None
         self.session_token = None
+
+        play_sound_startup() # Sonido de bienvenida
 
         # --- Bucle de Login Persistente ---
         self.run_login_loop()
