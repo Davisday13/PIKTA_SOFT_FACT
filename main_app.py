@@ -2213,6 +2213,7 @@ class AdminFrame(tk.Canvas):
         user = kwargs.pop('user', None)
         super().__init__(parent, bg=BG, highlightthickness=0, *args, **kwargs)
         self.db = db
+        self.user = user
         
         # Logo de Fondo en Admin
         bg_logo_path = os.path.join('Imagenes', 'pikta2.png')
@@ -2300,36 +2301,39 @@ class AdminFrame(tk.Canvas):
 
     def setup_admin_menu(self):
         """Crea el dashboard interno de administración con cuadritos e imágenes."""
+        # Agregar herramientas avanzadas abajo primero, para que no queden ocultas
+        self.setup_admin_tools(self.menu_frame)
+
         cards_wrap = ttk.Frame(self.menu_frame)
         cards_wrap.pack(fill='both', expand=True)
 
         def make_admin_card(parent, img_name, title, desc, cmd, color="success"):
             # Reutilizamos el estilo de 'pop-out' del dashboard principal
-            card = ttk.Frame(parent, bootstyle="secondary", padding=2, cursor="hand2", takefocus=True, width=220, height=260)
+            card = ttk.Frame(parent, bootstyle="secondary", padding=2, cursor="hand2", takefocus=True, width=210, height=230)
             card.pack_propagate(False)
             
-            inner = ttk.Frame(card, padding=10) 
+            inner = ttk.Frame(card, padding=8) 
             inner.pack(fill='both', expand=True)
 
             # Carga de imagen o emoji por defecto
             img = None
             if img_name:
                 path = os.path.join('Imagenes', img_name)
-                img = load_image(path, size=(90, 90))
+                img = load_image(path, size=(65, 65))
             
             if img:
                 lbl = ttk.Label(inner, image=img)
                 lbl.image = img
-                lbl.pack(pady=10)
+                lbl.pack(pady=(5, 5))
             else:
                 # Si no hay imagen, usar un emoji genérico según el título
                 emoji = '📦'
                 if 'Usuarios' in title: emoji = '👥'
                 if 'Seguridad' in title: emoji = '🛡️'
-                ttk.Label(inner, text=emoji, font=(None, 45)).pack(pady=10)
+                ttk.Label(inner, text=emoji, font=(None, 40)).pack(pady=(5, 5))
 
-            ttk.Label(inner, text=title, font=(None, 22, 'bold'), wraplength=200, justify='center').pack(pady=5)
-            ttk.Label(inner, text=desc, wraplength=180, justify='center', font=(None, 12)).pack(pady=5, fill='both', expand=True)
+            ttk.Label(inner, text=title, font=(None, 16, 'bold'), wraplength=190, justify='center').pack(pady=(0, 2))
+            ttk.Label(inner, text=desc, wraplength=180, justify='center', font=(None, 10)).pack(pady=2, fill='both', expand=True)
 
             def on_enter(e):
                 card.configure(bootstyle=color, padding=5)
@@ -2355,26 +2359,25 @@ class AdminFrame(tk.Canvas):
             return card
 
         # Tarjetas del Admin con sus imágenes correspondientes
+        all_admin_cards = [
+            ('inventario.jpg', 'Inventario', 'Control de stock y materia prima.', lambda: self.open_section(1, "GESTIÓN DE INVENTARIO"), ['Administrador', 'Supervisor']),
+            ('user.png', 'Usuarios', 'Gestión de personal y accesos.', lambda: self.open_section(2, "GESTIÓN DE USUARIOS"), ['Administrador']),
+            ('seguridad.png', 'Seguridad', 'Auditoría y respaldos de DB.', lambda: self.open_section(3, "SEGURIDAD Y AUDITORÍA"), ['Administrador']),
+            ('pos.png', 'Menú / Productos', 'Gestión de productos y precios.', lambda: self.open_section(4, "GESTIÓN DE MENÚ"), ['Administrador', 'Supervisor']),
+            ('efectivo.jpeg', 'Cierres de Caja', 'Historial de reportes de cierre.', lambda: self.open_section(5, "HISTORIAL DE CIERRES"), ['Administrador', 'Supervisor'])
+        ]
+
+        user_role = self.user.get('rol', '') if self.user else ''
+        filtered_cards = [c for c in all_admin_cards if user_role in c[4]]
+
         admin_cards = []
-        c1 = make_admin_card(cards_wrap, 'inventario.jpg', 'Inventario', 'Control de stock y materia prima.', lambda: self.open_section(1, "GESTIÓN DE INVENTARIO"))
-        c1.grid(row=0, column=0, padx=20, pady=20)
-        admin_cards.append(c1)
+        for i, data in enumerate(filtered_cards):
+            card = make_admin_card(cards_wrap, data[0], data[1], data[2], data[3])
+            row = i // 5
+            col = i % 5
+            card.grid(row=row, column=col, padx=10, pady=10)
+            admin_cards.append(card)
 
-        c2 = make_admin_card(cards_wrap, 'user.png', 'Usuarios', 'Gestión de personal y accesos.', lambda: self.open_section(2, "GESTIÓN DE USUARIOS"))
-        c2.grid(row=0, column=1, padx=20, pady=20)
-        admin_cards.append(c2)
-
-        c3 = make_admin_card(cards_wrap, 'seguridad.png', 'Seguridad', 'Auditoría y respaldos de DB.', lambda: self.open_section(3, "SEGURIDAD Y AUDITORÍA"))
-        c3.grid(row=0, column=2, padx=20, pady=20)
-        admin_cards.append(c3)
-
-        c4 = make_admin_card(cards_wrap, 'pos.png', 'Menú / Productos', 'Gestión de productos y precios.', lambda: self.open_section(4, "GESTIÓN DE MENÚ"))
-        c4.grid(row=0, column=3, padx=20, pady=20)
-        admin_cards.append(c4)
-
-        c5 = make_admin_card(cards_wrap, 'efectivo.jpeg', 'Cierres de Caja', 'Historial de reportes de cierre.', lambda: self.open_section(5, "HISTORIAL DE CIERRES"))
-        c5.grid(row=1, column=0, padx=20, pady=20)
-        admin_cards.append(c5)
 
         # Navegación por flechas para las tarjetas de Admin (Fila de 4)
         def nav_admin(idx, e):
@@ -2385,10 +2388,11 @@ class AdminFrame(tk.Canvas):
             card.bind("<Left>", lambda e, idx=i: nav_admin(idx, e))
             card.bind("<Right>", lambda e, idx=i: nav_admin(idx, e))
 
-        for i in range(4): cards_wrap.columnconfigure(i, weight=1)
+        num_cols = min(len(filtered_cards), 5)
+        if num_cols == 0: num_cols = 1
+        for i in range(num_cols): cards_wrap.columnconfigure(i, weight=1)
 
-        # Agregar herramientas avanzadas abajo
-        self.setup_admin_tools(self.menu_frame)
+
 
     def open_section(self, index, title):
         """Abre una sección específica y actualiza la cabecera."""
@@ -3346,7 +3350,7 @@ class App(ttk.Window):
                 ('pos.png', 'Caja / POS', 'Ventas y cobros.', self.open_pos, INFO, ['Administrador', 'Supervisor', 'Cajera']),
                 ('user.png', 'Mesero', 'Pedidos a mesa.', self.open_mesero, WARNING, ['Administrador', 'Supervisor', 'Cajera', 'Mesero']),
                 ('cocina.jpeg', 'Cocina (KDS)', 'Gestión de órdenes.', self.open_kds, DANGER, ['Administrador', 'Supervisor', 'Cocina']),
-                ('admin.jpeg', 'Admin', 'Configuración.', self.open_admin, PRIMARY, ['Administrador'])
+                ('admin.jpeg', 'Admin', 'Configuración.', self.open_admin, PRIMARY, ['Administrador', 'Supervisor'])
             ]
             
             user_role = self.user.get('rol', '') if self.user else ''
@@ -3507,8 +3511,8 @@ class App(ttk.Window):
 
     def open_admin(self):
         """Cambia a la pestaña de Administración."""
-        if self.user.get('rol') != 'Administrador':
-            messagebox.showerror('Acceso Denegado', 'Solo el Administrador puede ingresar a este módulo.')
+        if self.user.get('rol') not in ['Administrador', 'Supervisor']:
+            messagebox.showerror('Acceso Denegado', 'Solo el Administrador o Supervisor pueden ingresar a este módulo.')
             return
             
         idx, frame = self._get_or_create_tab('Admin', AdminFrame)
@@ -3522,7 +3526,7 @@ class App(ttk.Window):
                 return i, self.notebook.nametowidget(self.notebook.tabs()[i])
         
         # Si no existe, crearla dinámicamente
-        if frame_class in (POSFrame, MeseroFrame, KDSFrame):
+        if frame_class in (POSFrame, MeseroFrame, KDSFrame, AdminFrame):
             frame = frame_class(self.notebook, self.db, user=self.user)
         else:
             frame = frame_class(self.notebook, self.db)
