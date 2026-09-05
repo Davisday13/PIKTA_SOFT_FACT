@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+env/
+
+# Database
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Logs
+*.log
+error_log.txt
+import.log
+run_output.log
+run_output2.log
+security_alerts.log
+
+# Build
+build/
+dist/
+*.spec
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Secrets
+encryption.key
+
+# Backups
+Backups/
+
+# WhatsApp session (datos locales del navegador)
+whatsapp_session/
+
+# Scratch
+scratch/
+check_db.py

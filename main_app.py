@@ -24,6 +24,11 @@ import webbrowser
 import threading
 import multiprocessing
 try:
+    import api_server
+except ImportError:
+    api_server = None
+
+try:
     import webview
     WEBVIEW_AVAILABLE = True
 except ImportError:
@@ -46,24 +51,47 @@ try:
 except ImportError:
     WIN32_PRINT_AVAILABLE = False
 
+from printer_config import PrinterConfig, PrinterConfigDialog
+
 # =============================================================================
 # FUNCIONES DE IMPRESIÓN Y HARDWARE
 # =============================================================================
 
-def find_pos_printer():
-    """Busca automáticamente una impresora térmica USB conectada."""
+def find_pos_printer(force_select=False):
+    """Busca automáticamente o permite seleccionar la impresora térmica."""
     if not WIN32_PRINT_AVAILABLE: return None
     try:
-        # 1. Intentar con la impresora por defecto
+        # Si ya se guardó una preferencia en esta sesión, usarla
+        if hasattr(tk, "_selected_printer") and not force_select:
+            return tk._selected_printer
+
         default = win32print.GetDefaultPrinter()
-        # 2. Si no es obvia, buscar una que diga POS, Thermal o 80
         printers = win32print.EnumPrinters(win32print.PRINTER_ENUM_LOCAL | win32print.PRINTER_ENUM_CONNECTIONS)
-        for flags, description, name, comment in printers:
+        printer_names = [p[2] for p in printers]
+
+        # Si forzamos selección o no hay nada obvio, preguntar
+        if force_select:
+            from tkinter import simpledialog
+            # Crear una pequeña ventana de selección
+            win = tk.Toplevel()
+            win.withdraw()
+            msg = "Seleccione su impresora térmica:\n\n" + "\n".join([f"{i+1}. {n}" for i, n in enumerate(printer_names)])
+            idx = simpledialog.askinteger("Configurar Impresora", msg, parent=win, minvalue=1, maxvalue=len(printer_names))
+            win.destroy()
+            if idx:
+                tk._selected_printer = printer_names[idx-1]
+                return tk._selected_printer
+
+        # Intento automático
+        for name in printer_names:
             n = name.upper()
-            if "POS" in n or "THERMAL" in n or "80MM" in n or "58MM" in n or "XP-80" in n:
+            if any(k in n for k in ["POS", "THERMAL", "80MM", "58MM", "XP-80", "PRINTER", "RECEIPT"]):
+                tk._selected_printer = name
                 return name
+        
+        tk._selected_printer = default
         return default
-    except:
+    except Exception:
         return None
 
 # =============================================================================
@@ -74,42 +102,91 @@ def play_sound_startup():
     """Sonido de bienvenida al iniciar la app."""
     try:
         winsound.PlaySound('SystemAsterisk', winsound.SND_ALIAS | winsound.SND_ASYNC)
-    except:
+    except Exception:
         pass
 
 def play_sound_error():
     """Sonido para errores del sistema."""
     try:
         winsound.PlaySound('SystemHand', winsound.SND_ALIAS | winsound.SND_ASYNC)
-    except:
+    except Exception:
         pass
 
 def play_sound_new_order():
     """Sonido suave para nuevos pedidos entrantes."""
     try:
         winsound.PlaySound('SystemExclamation', winsound.SND_ALIAS | winsound.SND_ASYNC)
-    except:
+    except Exception:
         pass
 
 def play_sound_order_ready():
-    """Sonido fuerte de campanas para cuando un pedido está listo."""
+    """Sonido de campana para cuando un pedido está listo (MP3 nativo)."""
     try:
-        # Sonido de "Ding-Ding" (Campana de servicio)
-        winsound.Beep(880, 150)
-        winsound.Beep(1046, 300)
-    except:
+        import ctypes
+        import sys
+        import os
+        sound_path = os.path.abspath(os.path.join('Imagenes', 'sonidos y alertas', 'Sonido de_ Campana de servicio.mp3'))
+        if os.path.exists(sound_path) and sys.platform == "win32":
+            from ctypes import wintypes
+            buffer = ctypes.create_unicode_buffer(260)
+            ctypes.windll.kernel32.GetShortPathNameW(sound_path, buffer, 260)
+            short_path = buffer.value
+            ctypes.windll.winmm.mciSendStringW('close myalert', None, 0, None)
+            ctypes.windll.winmm.mciSendStringW(f'open {short_path} type mpegvideo alias myalert', None, 0, None)
+            ctypes.windll.winmm.mciSendStringW('play myalert', None, 0, None)
+        else:
+            winsound.Beep(880, 150)
+            winsound.Beep(1046, 300)
+    except Exception as e:
+        logging.error(f"Error en play_sound_order_ready: {e}")
+
+def play_sound_delayed_order():
+    """Sonido de atención para cuando el tiempo de preparación de un pedido se acaba."""
+    try:
+        import ctypes
+        import sys
+        import os
+        sound_path = os.path.abspath(os.path.join('Imagenes', 'sonidos y alertas', 'sonido de atencion.mp3'))
+        if os.path.exists(sound_path) and sys.platform == "win32":
+            from ctypes import wintypes
+            buffer = ctypes.create_unicode_buffer(260)
+            ctypes.windll.kernel32.GetShortPathNameW(sound_path, buffer, 260)
+            short_path = buffer.value
+            ctypes.windll.winmm.mciSendStringW('close delayed_alert', None, 0, None)
+            ctypes.windll.winmm.mciSendStringW(f'open {short_path} type mpegvideo alias delayed_alert', None, 0, None)
+            ctypes.windll.winmm.mciSendStringW('play delayed_alert repeat', None, 0, None)
+        else:
+            winsound.PlaySound("SystemHand", winsound.SND_ALIAS | winsound.SND_ASYNC | winsound.SND_LOOP)
+    except Exception as e:
+        logging.error(f"Error en play_sound_delayed_order: {e}")
+
+def stop_sound_delayed_order():
+    """Detiene el sonido de atención de pedido retrasado."""
+    try:
+        import ctypes
+        import sys
+        if sys.platform == "win32":
+            ctypes.windll.winmm.mciSendStringW('close delayed_alert', None, 0, None)
+        winsound.PlaySound(None, winsound.SND_PURGE)
+    except Exception as e:
         pass
 
 # =============================================================================
 # FUNCIONES DE SEGURIDAD (ENCRIPTACIÓN AVANZADA - FASE 3)
 # =============================================================================
-import bcrypt
+try:
+    import bcrypt
+    BCRYPT_AVAILABLE = True
+except ImportError:
+    BCRYPT_AVAILABLE = False
+    logging.warning("bcrypt no instalado. Usando fallback a hashlib.")
+
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives import hashes
 
 class PasswordManager:
-    """Gestión avanzada de contraseñas con múltiples capas (PBKDF2 + Bcrypt)."""
+    """Gestión avanzada de contraseñas con múltiples capas (PBKDF2 + Bcrypt/Fallback)."""
     PBKDF2_ITERATIONS = 100000 
     BCRYPT_ROUNDS = 10
     PEPPER = os.environ.get('PIKTA_PEPPER', 'default_pepper_change_me')
@@ -117,36 +194,71 @@ class PasswordManager:
     @staticmethod
     def hash_password_advanced(password: str) -> str:
         pwd_pepper = password + PasswordManager.PEPPER
+        
+        if not BCRYPT_AVAILABLE:
+            # Fallback seguro usando solo PBKDF2
+            salt = secrets.token_hex(32)
+            hash_obj = hashlib.pbkdf2_hmac('sha256', pwd_pepper.encode(), salt.encode(), 
+                                          PasswordManager.PBKDF2_ITERATIONS)
+            return f"1|{salt}|{hash_obj.hex()}"
+        
+        # Implementación normal con bcrypt
         salt = os.urandom(32)
-        kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=salt, iterations=PasswordManager.PBKDF2_ITERATIONS)
+        kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=salt, 
+                        iterations=PasswordManager.PBKDF2_ITERATIONS)
         pbkdf2_hash = kdf.derive(pwd_pepper.encode())
         bcrypt_hash = bcrypt.hashpw(pbkdf2_hash, bcrypt.gensalt(rounds=PasswordManager.BCRYPT_ROUNDS))
         return f"2|{salt.hex()}|{bcrypt_hash.decode()}"
     
     @staticmethod
     def verify_password_advanced(provided_password: str, stored_hash: str) -> bool:
-        if not stored_hash: return False
+        if not stored_hash:
+            return False
         
-        # Retrocompatibilidad con hashes antiguos (Fase 1 o anteriores)
-        if ':' in stored_hash and not stored_hash.startswith('2|'):
+        # Verificar formato legacy (hashlib fallback o antiguo)
+        if stored_hash.startswith('1|'):
+            try:
+                _, salt, hash_value = stored_hash.split('|')
+                pwd_pepper = provided_password + PasswordManager.PEPPER
+                hash_obj = hashlib.pbkdf2_hmac('sha256', pwd_pepper.encode(), salt.encode(), 
+                                              PasswordManager.PBKDF2_ITERATIONS)
+                return hash_obj.hex() == hash_value
+            except Exception:
+                return False
+        
+        # Formato con bcrypt
+        if stored_hash.startswith('2|'):
+            if not BCRYPT_AVAILABLE:
+                logging.error("Se requiere bcrypt para verificar este hash")
+                return False
+            
+            try:
+                version, salt_hex, bcrypt_hash = stored_hash.split('|')
+                pwd_pepper = provided_password + PasswordManager.PEPPER
+                salt = bytes.fromhex(salt_hex)
+                kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=salt,
+                                iterations=PasswordManager.PBKDF2_ITERATIONS)
+                pbkdf2_hash = kdf.derive(pwd_pepper.encode())
+                return bcrypt.checkpw(pbkdf2_hash, bcrypt_hash.encode())
+            except Exception:
+                return False
+        
+        # Formato antiguo (solo hashlib, sin pepper)
+        if ':' in stored_hash:
             try:
                 salt, hash_value = stored_hash.split(':')
                 hash_obj = hashlib.pbkdf2_hmac('sha256', provided_password.encode(), salt.encode(), 100000)
                 return hash_obj.hex() == hash_value
             except Exception:
                 return False
-                
-        # Nueva validación Bcrypt
-        try:
-            version, salt_hex, bcrypt_hash = stored_hash.split('|')
-            if version != '2': return False
-            pwd_pepper = provided_password + PasswordManager.PEPPER
-            salt = bytes.fromhex(salt_hex)
-            kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=salt, iterations=PasswordManager.PBKDF2_ITERATIONS)
-            pbkdf2_hash = kdf.derive(pwd_pepper.encode())
-            return bcrypt.checkpw(pbkdf2_hash, bcrypt_hash.encode())
-        except Exception:
-            return False
+        
+        return False
+
+try:
+    import cv2
+    CV2_AVAILABLE = True
+except ImportError:
+    CV2_AVAILABLE = False
 
 class DataEncryption:
     """Encriptación de datos sensibles en la base de datos (Ej: Teléfonos)."""
@@ -173,15 +285,14 @@ class DataEncryption:
         try:
             decoded = base64.b64decode(encrypted_data.encode())
             return self.cipher.decrypt(decoded).decode()
-        except: return "*** ENCRYPTED ***"
+        except Exception: return "*** ENCRYPTED ***"
 
 class PasswordPolicy:
     """Políticas estrictas de contraseñas para nuevos usuarios."""
-    MIN_LENGTH = 6
+    MIN_LENGTH = 4
     @classmethod
     def validate(cls, pwd: str) -> tuple[bool, str]:
         if len(pwd) < cls.MIN_LENGTH: return False, f"Mínimo {cls.MIN_LENGTH} caracteres"
-        if not any(c.isdigit() for c in pwd): return False, "Debe incluir un número"
         return True, "OK"
 
 # Funciones puente para no romper código antiguo
@@ -241,7 +352,7 @@ def require_permission(permission: Permissions):
             if permission not in user_role.get_permissions():
                 messagebox.showerror("Acceso Denegado", f"No tiene permiso para la acción: {permission.value}")
                 try: self.db.log_access(user['id'], user['username'], 'unauthorized_access', func.__name__)
-                except: pass
+                except Exception: pass
                 return
             
             return func(self, *args, **kwargs)
@@ -323,6 +434,13 @@ tk.Tk.report_callback_exception = _tk_report_callback_exception
 # =============================================================================
 # CONFIGURACIÓN VISUAL Y CONSTANTES
 # =============================================================================
+# =============================================================================
+# CONFIGURACIÓN DE CONEXIÓN (NUBE VS LOCAL)
+# =============================================================================
+USE_CLOUD = False  # Cambiar a True para modo nube (PythonAnywhere)
+CLOUD_URL = "https://Davis2025.pythonanywhere.com"
+CLOUD_TOKEN = os.environ.get('PIKTA_CLOUD_TOKEN', 'PIKTA_CLOUD_2025_SECURE_TOKEN')
+
 DB_NAME = "PIk'TADB.db"  # Nombre del archivo de base de datos SQLite
 BG = '#2b3e50'          # Color de fondo principal (Azul Petróleo Superhero)
 PANEL = '#4e5d6c'       # Color de fondo para paneles y tarjetas
@@ -354,14 +472,46 @@ def load_image(path, size=None):
         return None
     try:
         if PIL_AVAILABLE:
+            from PIL import ImageOps
             img = Image.open(path)
             if size:
-                img = img.resize(size, Image.LANCZOS)
+                # Convertir a RGBA para fondo transparente y usar pad para evitar deformación
+                img = img.convert("RGBA")
+                try:
+                    img = ImageOps.pad(img, size, color=(255, 255, 255, 0))
+                except AttributeError:
+                    img = img.resize(size, Image.LANCZOS)
             return ImageTk.PhotoImage(img)
         else:
             return tk.PhotoImage(file=path)
-    except Exception:
+    except Exception as e:
+        print(f"Error cargando imagen {path}: {e}")
         return None
+
+def find_product_image_path(product_name):
+    """Busca la imagen de un producto en la carpeta Imagenes usando coincidencia flexible (difflib)."""
+    import os, re, difflib
+    img_dir = 'Imagenes'
+    if not os.path.exists(img_dir): return None
+    
+    def normalize(t): return re.sub(r'[^a-zA-Z0-9]', '', str(t)).lower()
+    target = normalize(product_name)
+    
+    files_map = {}
+    for f in os.listdir(img_dir):
+        if f.lower().endswith(('.png', '.jpg', '.jpeg', '.webp', '.avif')):
+            base_name = os.path.splitext(f)[0]
+            norm_f = normalize(base_name)
+            files_map[norm_f] = os.path.join(img_dir, f)
+            
+    if target in files_map:
+        return files_map[target]
+        
+    matches = difflib.get_close_matches(target, files_map.keys(), n=1, cutoff=0.5)
+    if matches:
+        return files_map[matches[0]]
+            
+    return None
 
 
 def _parse_money(text):
@@ -377,7 +527,7 @@ def _parse_money(text):
     num = m.group(0).replace(',', '.')
     try:
         return float(num)
-    except:
+    except Exception:
         return None
 
 
@@ -391,18 +541,128 @@ def center_window(win, width, height):
     win.geometry(f"{width}x{height}+{x}+{y}")
 
 
+import requests
+
+class RemoteRow:
+    """Simula una fila de sqlite3 que permite acceso por nombre e índice."""
+    def __init__(self, values, columns):
+        self._values = values
+        self._columns = columns
+        # Crear un mapa para acceso por nombre
+        self._data = {col: val for col, val in zip(columns, values)}
+        
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            return self._values[key]
+        return self._data.get(key)
+    
+    def get(self, key, default=None):
+        return self._data.get(key, default)
+    
+    def keys(self):
+        return self._columns
+
+class RemoteCursor:
+    def __init__(self, connection):
+        self.connection = connection
+        self.lastrowid = None
+        self.rowcount = 0
+        self._results = []
+        self._index = 0
+
+    def execute(self, query, params=None):
+        if params is None: params = []
+        # Convertir objetos complejos a string para JSON
+        clean_params = []
+        for p in params:
+            if isinstance(p, (datetime, timedelta)): clean_params.append(str(p))
+            else: clean_params.append(p)
+            
+        try:
+            response = requests.post(
+                f"{CLOUD_URL}/api/sql/proxy",
+                json={
+                    "token": CLOUD_TOKEN,
+                    "query": query,
+                    "params": clean_params,
+                    "fetch": True
+                },
+                timeout=15
+            )
+            
+            if response.status_code != 200:
+                print(f"Error del servidor ({response.status_code}): {response.text}")
+                logging.error(f"Error del servidor ({response.status_code}): {response.text[:500]}")
+                raise Exception(f"Error del servidor: {response.status_code}")
+
+            data = response.json()
+            if data["status"] == "success":
+                columns = data.get("columns", [])
+                rows_raw = data.get("result", [])
+                
+                # Convertir cada lista de valores en un objeto RemoteRow usando las columnas
+                self._results = [RemoteRow(row, columns) for row in rows_raw] if rows_raw else []
+                
+                self.lastrowid = data["lastrowid"]
+                self.rowcount = data["changes"]
+                self._index = 0
+            else:
+                raise Exception(data["message"])
+        except requests.exceptions.JSONDecodeError:
+            print(f"La nube no respondió JSON. Respuesta: {response.text[:200]}")
+            logging.error(f"Respuesta no JSON: {response.text[:500]}")
+            raise Exception("La nube respondió con un error (HTML). Revisa el log de PythonAnywhere.")
+        except Exception as e:
+            logging.error(f"Error en RemoteCursor.execute: {e}")
+            raise e
+
+    def fetchone(self):
+        if self._index < len(self._results):
+            row = self._results[self._index]
+            self._index += 1
+            return row
+        return None
+
+    def fetchall(self):
+        return self._results
+
+    def __iter__(self):
+        return iter(self._results)
+
+class RemoteConnection:
+    def __init__(self):
+        pass
+    def cursor(self):
+        return RemoteCursor(self)
+    def execute(self, query, params=None):
+        cur = self.cursor()
+        cur.execute(query, params)
+        return cur
+    def commit(self):
+        pass
+    def rollback(self):
+        pass
+    def close(self):
+        pass
+    def __enter__(self):
+        return self
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        pass
+
 class DatabaseManager:
     """
-    Controlador de la base de datos SQLite.
-    Se encarga de crear las tablas, manejar las conexiones y realizar migraciones.
+    Controlador de la base de datos (Soporta Nube y Local).
     """
 
     def __init__(self, db_name=DB_NAME):
         self.db_name = db_name
-        self.init_db()
+        if not USE_CLOUD:
+            self.init_db()
 
     def get_connection(self):
-        """Abre y retorna una conexión activa a la base de datos."""
+        """Retorna una conexión local o el Proxy de la nube."""
+        if USE_CLOUD:
+            return RemoteConnection()
         return sqlite3.connect(self.db_name)
 
     def init_db(self):
@@ -485,8 +745,8 @@ class DatabaseManager:
             self._ensure_column('pedidos', 'preparacion_inicio', 'TEXT')
             self._ensure_column('pedidos', 'preparacion_duracion', 'INTEGER')
 
-            # Migración de contraseñas a formato hash seguro (Por lotes y recolector de basura)
-            self._migrate_passwords_safely()
+            # Migración de contraseñas a formato hash seguro (En segundo plano para no ralentizar el inicio)
+            threading.Thread(target=self._migrate_passwords_safely, daemon=True).start()
 
             # Usuarios por defecto (con contraseñas ya encriptadas)
             seeds = [
@@ -567,7 +827,7 @@ class DatabaseManager:
         try:
             hostname = socket.gethostname()
             ip = socket.gethostbyname(hostname)
-        except:
+        except Exception:
             hostname, ip = "Unknown", "Unknown"
             
         full_details = f"[{hostname} - {ip}] {detalles}"
@@ -577,7 +837,7 @@ class DatabaseManager:
             try:
                 with open('security_alerts.log', 'a') as f:
                     f.write(f"{datetime.now().isoformat()} - CRITICAL: {usuario} - {accion} - {full_details}\n")
-            except:
+            except Exception:
                 pass
 
     def create_backup(self):
@@ -604,35 +864,65 @@ class DatabaseManager:
             return None
 
     def _migrate_passwords_safely(self, batch_size=50):
-        """Migra contraseñas en lotes pequeños con limpieza de memoria para evitar exposición en RAM."""
         import gc
+        
+        # Evitar múltiples ejecuciones
+        if hasattr(self, '_migration_completed') and self._migration_completed:
+            return
+        self._migration_completed = True
+        
+        max_retries_per_user = 3
+        retry_count = {}
+        
         with self.get_connection() as conn:
             cur = conn.cursor()
+            
             while True:
-                # Obtener lote de usuarios SIN migrar al nuevo sistema (que no empiecen con '2|')
-                cur.execute("SELECT id, username, password FROM usuarios WHERE password NOT LIKE '2|%' LIMIT ?", (batch_size,))
+                cur.execute("""
+                    SELECT id, username, password FROM usuarios 
+                    WHERE password NOT LIKE '2|%' 
+                    AND password NOT LIKE '1|%'
+                    AND password NOT LIKE 'FAILED_%'
+                    LIMIT ?
+                """, (batch_size,))
+                
                 batch = cur.fetchall()
                 if not batch:
                     break
                 
                 for uid, uname, pwd in batch:
+                    # Verificar reintentos
+                    if retry_count.get(uid, 0) >= max_retries_per_user:
+                        logging.error(f"Migración fallida para usuario {uid} después de {max_retries_per_user} intentos")
+                        # Marcar como migrado con un marcador especial para no reintentar
+                        cur.execute("UPDATE usuarios SET password = ? WHERE id = ?", 
+                                   (f"FAILED_{pwd[:50]}", uid))
+                        conn.commit()
+                        continue
+                    
                     try:
-                        # Restablecemos usuarios por defecto si fueron corrompidos en la ejecución anterior
-                        if uname in ['Davis', 'Rommel', 'Estefani', 'cocina', 'mesero'] and len(pwd) > 100:
-                            pwd = '1234' # Hard reset de contraseñas corrompidas por el bug de loop
+                        # Solo resetear si está claramente corrupto
+                        if uname in ['Davis', 'Rommel', 'Estefani', 'cocina', 'mesero', 'admin']:
+                            if not pwd or len(pwd) > 200 or pwd.startswith('FAILED_'):
+                                pwd = '1234'
+                                logging.warning(f"Reset password for default user {uname}")
                         
                         new_pwd = hash_password(pwd)
                         cur.execute("UPDATE usuarios SET password = ? WHERE id = ?", (new_pwd, uid))
-                        # Limpiar inmediatamente de memoria
-                        del pwd, new_pwd
+                        conn.commit()
+                        retry_count[uid] = 0
+                        
                     except Exception as e:
-                        logging.error(f"Error migrando usuario {uid}: {e}")
+                        retry_count[uid] = retry_count.get(uid, 0) + 1
+                        logging.error(f"Error migrando usuario {uid} (intento {retry_count[uid]}): {e}")
                         continue
+                    
+                    # Limpiar memoria
+                    del pwd, new_pwd
                 
-                conn.commit()
                 del batch
-                gc.collect() # Forzar limpieza de memoria
-                time.sleep(0.01) # Pequeña pausa muy corta para permitir GC sin congelar inicio
+                gc.collect()
+                time.sleep(0.01)
 
     def _ensure_column(self, table, column, col_type):
         """Añade columna con validación estricta de nombres y prevención de inyección SQL en DDL."""
@@ -655,6 +945,8 @@ class DatabaseManager:
                 if column not in cols:
                     cur.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
                     conn.commit()
+            except sqlite3.OperationalError:
+                pass  # Column already exists, ignore
             except Exception as e:
                 logging.error(f"Error al añadir columna {column} a {table}: {e}")
 
@@ -664,7 +956,7 @@ class DatabaseManager:
         try:
             hostname = socket.gethostname()
             ip = socket.gethostbyname(hostname)
-        except:
+        except Exception:
             hostname, ip = "Unknown", "Unknown"
         
         full_details = f"[{hostname} - {ip}] {details}"
@@ -703,6 +995,16 @@ class DatabaseManager:
         except Exception as e:
             logging.exception(f'Error de ejecución DB: {e} - Query: {query}')
             raise
+
+
+class AutoScrollbar(ttk.Scrollbar):
+    """Un scrollbar que se oculta automáticamente cuando no es necesario."""
+    def set(self, lo, hi):
+        if float(lo) <= 0.0 and float(hi) >= 1.0:
+            self.grid_remove()
+        else:
+            self.grid()
+        super().set(lo, hi)
 
 
 class POSFrame(tk.Canvas):
@@ -763,8 +1065,7 @@ class POSFrame(tk.Canvas):
         
         ttk.Label(self.header, text='🛒 PUNTO DE VENTA (Caja)', font=(None, 24, 'bold'), bootstyle="inverse-info").pack(side='left', padx=10)
         
-        # Botones de acción rápida en la cabecera (más grandes)
-        ttk.Button(self.header, text='Regresar', command=lambda: self.master.select(0), bootstyle="secondary-outline", cursor="hand2", padding=10).pack(side='right', padx=5)
+        ttk.Button(self.header, text='Regresar', command=lambda: self.master.select(0), bootstyle="secondary", cursor="hand2", padding=10).pack(side='right', padx=5)
 
         self.btn_open_caja = ttk.Button(self.header, text='Abrir Caja', command=self.open_caja, bootstyle="success", cursor="hand2", padding=10)
         self.btn_open_caja.pack(side='right', padx=5)
@@ -780,37 +1081,74 @@ class POSFrame(tk.Canvas):
         self.pos_notebook.add(self.tab_venta, text='🛒 Venta Directa')
 
         # Lado izquierdo de Venta Directa: Catálogo
-        left_v = ttk.Frame(self.tab_venta)
-        left_v.pack(side='left', fill='both', expand=True, padx=(0, 10))
+        self.left_v = ttk.Frame(self.tab_venta)
+        self.left_v.pack(side='left', fill='both', expand=True, padx=(0, 10))
 
-        # Filtro de categorías
-        self.categories = ['🍔 Combos', '🍟 Extras', '🥤 Bebidas']
+        # Filtro de categorías dinámico
+        self.categories = [row[0] for row in self.db.fetch_all('SELECT DISTINCT categoria FROM productos_menu WHERE categoria IS NOT NULL')]
+        if not self.categories: self.categories = ['General']
         self.selected_category = tk.StringVar(value=self.categories[0])
-        cat_frame = ttk.Frame(left_v)
-        cat_frame.pack(fill='x', pady=(0, 15))
+        self.cat_frame = ttk.Frame(self.left_v)
+        self.cat_frame.pack(fill='x', pady=(0, 15))
+        self.refresh_category_buttons()
+
+    def refresh_category_buttons(self):
+        for child in self.cat_frame.winfo_children():
+            child.destroy()
+        
+        # Recargar categorías de la BD
+        self.categories = [row[0] for row in self.db.fetch_all('SELECT DISTINCT categoria FROM productos_menu WHERE categoria IS NOT NULL')]
+        if not self.categories: self.categories = ['General']
+        if self.selected_category.get() not in self.categories:
+            self.selected_category.set(self.categories[0])
+
         for c in self.categories:
-            ttk.Radiobutton(cat_frame, text=c, variable=self.selected_category, value=c, 
+            ttk.Radiobutton(self.cat_frame, text=c, variable=self.selected_category, value=c, 
                            command=self.render_products, bootstyle="info-toolbutton", padding=10).pack(side='left', padx=5)
 
         # Contenedor con scroll para los productos
-        self.products_canvas = tk.Canvas(left_v, bg=BG, highlightthickness=0)
-        self.scrollbar = ttk.Scrollbar(left_v, orient="vertical", command=self.products_canvas.yview)
+        products_wrapper = ttk.Frame(self.left_v)
+        products_wrapper.pack(side="left", fill="both", expand=True)
+        
+        self.products_canvas = tk.Canvas(products_wrapper, bg=BG, highlightthickness=0)
+        self.scrollbar = AutoScrollbar(products_wrapper, orient="vertical", command=self.products_canvas.yview)
         self.products_frame = ttk.Frame(self.products_canvas)
 
         self.products_frame.bind("<Configure>", lambda e: self.products_canvas.configure(scrollregion=self.products_canvas.bbox("all")))
-        self.products_canvas.create_window((0, 0), window=self.products_frame, anchor="nw")
+        self.products_frame_id = self.products_canvas.create_window((0, 0), window=self.products_frame, anchor="nw")
+        self.products_canvas.bind('<Configure>', lambda e: self.products_canvas.itemconfig(self.products_frame_id, width=e.width))
         self.products_canvas.configure(yscrollcommand=self.scrollbar.set)
-        self.products_canvas.pack(side="left", fill="both", expand=True)
-        self.scrollbar.pack(side="right", fill="y")
+        
+        self.products_canvas.grid(row=0, column=0, sticky="nsew")
+        self.scrollbar.grid(row=0, column=1, sticky="ns")
+        products_wrapper.columnconfigure(0, weight=1)
+        products_wrapper.rowconfigure(0, weight=1)
 
         # Lado derecho de Venta Directa: Carrito
-        right_v = ttk.Frame(self.tab_venta, width=350, bootstyle="secondary")
+        right_v = ttk.Frame(self.tab_venta, width=500, bootstyle="secondary")
         right_v.pack(side='right', fill='y')
         right_v.pack_propagate(False)
         
         ttk.Label(right_v, text='ORDEN ACTUAL', font=(None, 12, 'bold'), bootstyle="inverse-secondary", padding=10).pack(fill='x')
-        self.cart_list = tk.Listbox(right_v, bg=PANEL, fg=FG, font=(None, 11), bd=0, highlightthickness=0, selectbackground=ACCENT)
-        self.cart_list.pack(fill='both', expand=True, padx=10, pady=10)
+        
+        # --- Treeview para Venta Directa ---
+        tree_frame_venta = ttk.Frame(right_v)
+        tree_frame_venta.pack(fill='both', expand=True, padx=10, pady=10)
+        
+        cols_venta = ('Producto', 'Cant', 'Precio', 'Subtotal')
+        self.cart_tree_venta = ttk.Treeview(tree_frame_venta, columns=cols_venta, show='headings')
+        for col in cols_venta:
+            self.cart_tree_venta.heading(col, text=col)
+            self.cart_tree_venta.column(col, anchor='center', width=60)
+        self.cart_tree_venta.column('Producto', width=200, anchor='w')
+        self.cart_tree_venta.pack(side='left', fill='both', expand=True)
+        
+        cart_scroll_venta = ttk.Scrollbar(tree_frame_venta, orient='vertical', command=self.cart_tree_venta.yview)
+        self.cart_tree_venta.configure(yscrollcommand=cart_scroll_venta.set)
+        cart_scroll_venta.pack(side='right', fill='y')
+        
+        self.cart_tree_venta.bind("<Double-1>", self.on_cart_venta_double_click)
+        
         self.total_label = ttk.Label(right_v, text='Total: $0.00', font=(None, 14, 'bold'), bootstyle="inverse-secondary", padding=10)
         self.total_label.pack(fill='x')
 
@@ -830,10 +1168,32 @@ class POSFrame(tk.Canvas):
         self.pos_notebook.add(self.tab_cobros, text='📋 Cobrar Mesas')
         
         self.build_cobros_tab()
+        
+        # Iniciar polling para notificaciones de KDS
+        self.last_ready_orders = set()
+        self.poll_ready_orders()
 
         # Cargar productos inicialmente (SOLO SI ES VISIBLE)
         # Se movió a open_pos para carga diferida.
         pass
+
+    def poll_ready_orders(self):
+        """Revisa la base de datos para ver si la cocina terminó nuevos pedidos y reproduce sonido."""
+        try:
+            rows = self.db.fetch_all("SELECT id FROM pedidos WHERE estado = 'LISTO' AND pagado = 0")
+            current_ready = set(r[0] for r in rows)
+            
+            new_ready = current_ready - getattr(self, 'last_ready_orders', set())
+            if new_ready and hasattr(self, 'last_ready_orders'):
+                self.notify_order_ready("¡Nuevos Pedidos Listos!")
+                if hasattr(self, 'refresh_unpaid_orders'):
+                    self.refresh_unpaid_orders()
+                    
+            self.last_ready_orders = current_ready
+        except Exception:
+            pass
+        finally:
+            self.after(5000, self.poll_ready_orders)
 
     def build_cobros_tab(self):
         """Construye la interfaz para cobrar pedidos de meseros con teclado numérico y métodos de pago."""
@@ -869,9 +1229,9 @@ class POSFrame(tk.Canvas):
         right_c.pack(side='right', fill='both', expand=True)
         
         ttk.Label(right_c, text='DETALLE DE CUENTA', font=(None, 16, 'bold'), bootstyle="inverse-secondary", padding=5).pack(fill='x')
-        # Detalle tipo Excel (Treeview) - Reducido a 7 filas para dar espacio al teclado
+        # Detalle tipo Excel (Treeview) - Reducido a 3 filas para dar más espacio
         cols_det = ('Producto', 'Cant', 'Precio', 'Subtotal')
-        self.cart_tree = ttk.Treeview(right_c, columns=cols_det, show='headings', height=7)
+        self.cart_tree = ttk.Treeview(right_c, columns=cols_det, show='headings', height=3)
         for col in cols_det:
             self.cart_tree.heading(col, text=col)
             self.cart_tree.column(col, anchor='center', width=80)
@@ -896,7 +1256,7 @@ class POSFrame(tk.Canvas):
         # --- Teclado Numérico y Métodos de Pago ---
         # Definir estilos para botones
         style = ttk.Style()
-        style.configure("Large.TButton", font=(None, 16, 'bold'))
+        style.configure("Large.secondary.TButton", font=(None, 18, 'bold'))
         style.configure("success.TButton", font=(None, 12, 'bold'))
         style.configure("info.TButton", font=(None, 12, 'bold'))
         style.configure("primary.TButton", font=(None, 12, 'bold'))
@@ -947,9 +1307,9 @@ class POSFrame(tk.Canvas):
                 else: self.pay_amount_var.set(curr + key)
 
         for i, b in enumerate(buttons):
-            btn = ttk.Button(numpad, text=b, bootstyle="light", 
-                            command=lambda x=b: press_key(x), style="Large.TButton")
-            btn.grid(row=i//3, column=i%3, padx=2, pady=2, sticky='nsew')
+            btn = ttk.Button(numpad, text=b, style="Large.secondary.TButton", 
+                            command=lambda x=b: press_key(x))
+            btn.grid(row=i//3, column=i%3, padx=2, pady=2, sticky='nsew', ipady=5)
 
         # Métodos de Pago con Imágenes
         methods_frame = ttk.Frame(pay_frame, bootstyle="secondary")
@@ -1007,8 +1367,8 @@ class POSFrame(tk.Canvas):
         """Consulta pedidos de meseros y de caja (para llevar) que aún no han sido pagados."""
         for r in self.unpaid_tree.get_children(): self.unpaid_tree.delete(r)
         
-        # Incluimos 'LLEVAR' en la consulta para que el cajero pueda cobrarlos
-        query = "SELECT id, numero, mesa, total, created_at FROM pedidos WHERE pagado = 0 AND canal IN ('MESERO', 'LLEVAR') ORDER BY created_at DESC"
+        # Incluimos 'LLEVAR' y 'Móvil' en la consulta para que el cajero pueda cobrarlos
+        query = "SELECT id, numero, mesa, total, created_at FROM pedidos WHERE pagado = 0 AND canal IN ('MESERO', 'LLEVAR', 'Móvil') ORDER BY created_at DESC"
         rows = self.db.fetch_all(query)
         for r in rows:
             # Si mesa es None (pedidos para llevar), mostrar 'PARA LLEVAR'
@@ -1038,8 +1398,8 @@ class POSFrame(tk.Canvas):
             # Poblar tabla con items
             for it in items:
                 nombre = it.get('nombre', 'N/A')
-                precio = it.get('precio', 0.0)
-                qty = it.get('qty', 1)
+                precio = it.get('precio', it.get('precio_unitario', 0.0))
+                qty = it.get('qty', it.get('cantidad', 1))
                 subtotal = precio * qty
                 self.cart_tree.insert('', 'end', values=(nombre, f"x{qty}", f"${precio:.2f}", f"${subtotal:.2f}"))
             
@@ -1172,10 +1532,13 @@ class POSFrame(tk.Canvas):
                 # 3. Generar factura para mostrar e imprimir
                 factura_text = self.generate_invoice_text(order_id, method, final_items, total_amt, paid_amt, change)
                 
+                # 3.5 Abrir cajón de dinero y mandar a imprimir automáticamente con logo
+                self.open_cash_drawer()
+                self.print_graphical_ticket(factura_text, "factura")
+
                 messagebox.showinfo('Éxito', f'Pago procesado correctamente.\nCambio: ${change:.2f}')
                 
-                # 4. Mostrar factura y opción de imprimir
-                self.show_invoice_popup(factura_text)
+                # Ya no se muestra el popup, solo se imprime el ticket gráfico automáticamente
                 
                 # 5. Limpiar y actualizar
                 self.current_order_id = None
@@ -1198,35 +1561,167 @@ class POSFrame(tk.Canvas):
             try:
                 dt = datetime.fromisoformat(fecha)
                 fecha = dt.strftime("%d/%m/%Y %H:%M")
-            except: pass
+            except Exception: pass
 
-        factura =  "      *** PIK'TA GRILL ***\n"
-        factura += "  DONDE SI SABEMOS DE HAMBURGUESAS\n"
-        factura += "  ------------------------------------\n"
-        factura += f"  FACTURA: {num}\n"
-        factura += f"  FECHA:   {fecha}\n"
-        factura += f"  MESA:    {mesa if mesa else 'PARA LLEVAR'}\n"
-        factura += f"  CAJERO:  {self.user.get('nombre', 'Cajero')}\n"
-        factura += "  ------------------------------------\n"
-        factura += f"  {'CANT':<5} {'DESCRIPCIÓN':<20} {'SUB':>7}\n"
-        factura += "  ------------------------------------\n"
+        W = 40
+        factura = ""
+        factura += "DGI".center(W) + "\n"
+        factura += "RUC: 1675920-1-680848 DV 00".center(W) + "\n"
+        factura += "PIK'TA GRILL".center(W) + "\n"
+        factura += "C. Aristides Romero, David,".center(W) + "\n"
+        factura += "Provincia de Chiriquí.".center(W) + "\n"
+        factura += "62878787".center(W) + "\n"
+        factura += "COMPROBANTE AUXILIAR DE FACTURA ELECTRONIC".center(W) + "\n"
+        factura += "A".center(W) + "\n\n"
+        factura += "Factura de Operación Interna".center(W) + "\n"
+        factura += f"# {num}\n"
+        factura += f"FECHA: {fecha}\n"
+        factura += "SUCURSAL: 001\n"
+        factura += "CAJA/PTO FACT: 001\n"
+        factura += f"MESA: {mesa if mesa else 'PARA LLEVAR'}\n"
+        factura += f"CAJERO: {self.user.get('nombre', 'Cajero')}\n"
+        factura += "-" * W + "\n"
+        factura += "RECEPTOR: Consumidor final\n"
+        factura += f"CLIENTE: {mesa if mesa else 'CLIENTE GENÉRICO'}\n"
+        factura += "-" * W + "\n"
+        factura += f"{'DESCRIPCION':<28} {'MONTO':>11}\n"
+        factura += "-" * W + "\n"
         
         for it in items:
-            nombre = it['nombre'][:20]
+            nombre = it['nombre'][:38] # Limitar a 38 caracteres
             qty = it['qty']
-            sub = it['precio'] * qty
-            factura += f"  {qty:<5} {nombre:<20} ${sub:>7.2f}\n"
+            precio = it['precio']
+            sub = precio * qty
             
-        factura += "  ------------------------------------\n"
-        factura += f"  TOTAL:                $ {total:>10.2f}\n"
-        factura += f"  RECIBIDO:             $ {paid:>10.2f}\n"
-        factura += f"  CAMBIO:               $ {change:>10.2f}\n"
-        factura += "  ------------------------------------\n"
-        factura += f"  MÉTODO: {method}\n"
-        factura += "  ------------------------------------\n"
-        factura += "      GRACIAS POR SU PREFERENCIA\n"
-        factura += "         VUELVA PRONTO!\n"
+            factura += f"{nombre}\n"
+            line2 = f"{float(qty):.2f} X {precio:.2f} (0%)"
+            factura += f"{line2:<28} ${sub:>10.2f}\n"
+            
+        factura += "-" * W + "\n"
+        factura += f"{'SUBTOTAL':<28} ${total:>10.2f}\n"
+        factura += f"{'TOTAL':<28} ${total:>10.2f}\n"
+        factura += "-" * W + "\n"
+        factura += f"{method:<28} ${paid:>10.2f}\n"
+        if float(change) > 0:
+            factura += f"{'CAMBIO':<28} ${change:>10.2f}\n"
+        factura += "-" * W + "\n\n"
+        factura += "GRACIAS POR SU PREFERENCIA".center(W) + "\n"
+        factura += "VUELVA PRONTO!".center(W) + "\n"
         return factura
+
+    def open_cash_drawer(self, printer_name=None):
+        """Envía el comando ESC/POS para abrir el cajón de dinero.
+        Args:
+            printer_name: Nombre de la impresora (opcional, usa default si es None).
+        """
+        try:
+            if not printer_name:
+                cfg = PrinterConfig()
+                printer_name = cfg.resolve_printer("factura")
+            if not printer_name:
+                printer_name = win32print.GetDefaultPrinter()
+            hPrinter = win32print.OpenPrinter(printer_name)
+            try:
+                # Comando ESC/POS: ESC p m t1 t2
+                # \x1b\x70\x00\x19\xfa es el estándar para la mayoría de impresoras térmicas
+                drawer_command = b'\x1b\x70\x00\x19\xfa' 
+                win32print.StartDocPrinter(hPrinter, 1, ("Pikta Open Drawer", None, "RAW"))
+                win32print.StartPagePrinter(hPrinter)
+                win32print.WritePrinter(hPrinter, drawer_command)
+                win32print.EndPagePrinter(hPrinter)
+                win32print.EndDocPrinter(hPrinter)
+            finally:
+                win32print.ClosePrinter(hPrinter)
+        except Exception as e:
+            logging.error(f"No se pudo abrir el cajón de dinero: {e}")
+
+    def print_graphical_ticket(self, text, tipo_doc="factura"):
+        """Genera y envía a imprimir un ticket gráfico con el logo en alta resolución.
+        Args:
+            text: Texto del ticket a imprimir.
+            tipo_doc: Tipo de documento (factura, comanda, cierre, etc).
+        """
+        try:
+            if sys.platform == "win32":
+                cfg = PrinterConfig()
+                printer_name = cfg.resolve_printer(tipo_doc)
+                if not printer_name:
+                    printer_name = find_pos_printer()
+                if not printer_name:
+                    printer_name = win32print.GetDefaultPrinter()
+
+                from PIL import Image, ImageDraw, ImageFont
+                import os
+                import win32ui
+                import win32con
+                from PIL import ImageWin
+
+                hDC = win32ui.CreateDC()
+                hDC.CreatePrinterDC(printer_name)
+                
+                # Calcular ancho basado en resolución (80mm = ~3.15 pulgadas)
+                dpi_x = hDC.GetDeviceCaps(win32con.LOGPIXELSX)
+                if dpi_x < 100: dpi_x = 203 # Fallback para impresoras genéricas
+                
+                img_width = int(3.15 * dpi_x)
+                scale = img_width / 380.0 # Base scale assuming 380px was 1x
+
+                lines = text.split('\n')
+                
+                # Cargar logo
+                logo_path = os.path.join('Imagenes', 'pikata.png')
+                logo_img = None
+                logo_height = 0
+                if os.path.exists(logo_path):
+                    logo_img = Image.open(logo_path).convert("RGBA")
+                    aspect_ratio = logo_img.height / logo_img.width
+                    new_width = int(200 * scale)
+                    new_height = int(new_width * aspect_ratio)
+                    logo_img = logo_img.resize((new_width, new_height), Image.LANCZOS)
+                    bg = Image.new("RGB", logo_img.size, (255, 255, 255))
+                    if len(logo_img.split()) == 4:
+                        bg.paste(logo_img, mask=logo_img.split()[3])
+                    else:
+                        bg.paste(logo_img)
+                    logo_img = bg
+                    logo_height = new_height
+
+                line_spacing = int(20 * scale)
+                img_height = logo_height + int(20 * scale) + (len(lines) * line_spacing)
+                img = Image.new('RGB', (img_width, img_height), 'white')
+                draw = ImageDraw.Draw(img)
+                
+                try:
+                    font = ImageFont.truetype("cour.ttf", int(12 * scale))
+                except Exception:
+                    font = ImageFont.load_default()
+                        
+                y = int(10 * scale)
+                if logo_img:
+                    img.paste(logo_img, ((img_width - logo_img.width) // 2, y))
+                    y += logo_height + int(10 * scale)
+                    
+                for line in lines:
+                    draw.text((int(10 * scale), y), line, fill='black', font=font)
+                    y += line_spacing
+                    
+                hDC.StartDoc("Ticket Pikta")
+                hDC.StartPage()
+                
+                dib = ImageWin.Dib(img)
+                dib.draw(hDC.GetHandleOutput(), (0, 0, img_width, img_height))
+                
+                hDC.EndPage()
+                hDC.EndDoc()
+                hDC.DeleteDC()
+            else:
+                import tempfile
+                fd, path = tempfile.mkstemp(suffix=".txt")
+                with os.fdopen(fd, 'w') as f:
+                    f.write(text)
+                messagebox.showinfo("Info", "Impresión gráfica solo disponible en Windows")
+        except Exception as e:
+            logging.error(f"No se pudo imprimir el ticket gráfico: {e}")
 
     def show_invoice_popup(self, text):
         """Muestra una ventana emergente con la factura y opción de imprimir."""
@@ -1253,21 +1748,8 @@ class POSFrame(tk.Canvas):
         btn_frame.pack(fill='x')
         
         def print_ticket():
-            # Guardar en temporal e imprimir
-            try:
-                fd, path = tempfile.mkstemp(suffix=".txt")
-                with os.fdopen(fd, 'w') as f:
-                    f.write(text)
-                
-                # Intentar imprimir (comando específico de windows)
-                if sys.platform == "win32":
-                    os.startfile(path, "print")
-                else:
-                    messagebox.showinfo("Info", "Impresión solo disponible en Windows")
-                
-                win.destroy()
-            except Exception as e:
-                messagebox.showerror("Error", f"No se pudo imprimir: {e}")
+            self.print_graphical_ticket(text, "factura")
+            win.destroy()
 
         ttk.Button(btn_frame, text="IMPRIMIR TICKET", command=print_ticket, bootstyle="success").pack(side='left', fill='x', expand=True, padx=5)
         ttk.Button(btn_frame, text="CERRAR", command=win.destroy, bootstyle="danger").pack(side='right', fill='x', expand=True, padx=5)
@@ -1296,20 +1778,37 @@ class POSFrame(tk.Canvas):
         if not self.cart: return
         
         try:
-            # Obtener items actuales
-            res = self.db.fetch_one("SELECT items, mesa FROM pedidos WHERE id=?", (self.editing_table_id,))
+            # Obtener items y estado actual
+            res = self.db.fetch_one("SELECT items, mesa, estado FROM pedidos WHERE id=?", (self.editing_table_id,))
             if not res: return
             
             current_items = json.loads(res[0])
             mesa = res[1]
+            estado_actual = res[2]
             
             # Añadir nuevos
-            new_items = [{'id': p[0], 'nombre': p[1], 'precio': p[2]} for p in self.cart]
+            new_items = [{'id': item['product'][0], 'nombre': item['product'][1] + (" (EXTRA)" if estado_actual == 'LISTO' else ""), 'precio': item['product'][2], 'qty': item['qty']} for item in self.cart]
             updated_items = current_items + new_items
-            new_total = sum(p['precio'] for p in updated_items)
+            new_total = sum(p.get('precio', p.get('precio_unitario', 0)) * p.get('qty', p.get('cantidad', 1)) for p in updated_items)
             
             self.db.execute("UPDATE pedidos SET items=?, subtotal=?, total=? WHERE id=?", 
                             (json.dumps(updated_items, ensure_ascii=False), new_total, new_total, self.editing_table_id))
+            
+            # Si el pedido ya fue despachado de cocina, crear un ticket oculto para que cocina vea los extras
+            if estado_actual == 'LISTO':
+                items_kds = json.dumps(new_items, ensure_ascii=False)
+                numero = f"EX-{datetime.now().strftime('%H%M%S')}"
+                created_at = datetime.now().isoformat()
+                usuario_id = self.user.get('id') if self.user else None
+                default_min = int(PREP_DURATION.total_seconds() // 60)
+                try:
+                    order_prep = max([(item['product'][5] if (len(item['product']) > 5 and item['product'][5] is not None) else default_min) for item in self.cart])
+                except Exception:
+                    order_prep = default_min
+
+                # pagado=1 oculta este ticket de la caja, pero KDS lo verá porque estado='RECIBIDO'
+                self.db.execute('INSERT INTO pedidos (numero, items, subtotal, total, estado, canal, usuario_id, created_at, mesa, pagado, preparacion_duracion) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+                                (numero, items_kds, 0, 0, 'RECIBIDO', 'EXTRA', usuario_id, created_at, mesa, 1, order_prep))
             
             # Registrar en auditoría
             self.db.audit_log('pedidos', 'UPDATE', self.user.get('username'), f'Productos extras añadidos a {mesa}', new=new_items)
@@ -1343,20 +1842,36 @@ class POSFrame(tk.Canvas):
             ttk.Label(self.products_frame, text="No hay productos en esta categoría", padding=20).pack()
             return
 
-        # Dibujar productos en un grid de 3 columnas (Más grandes)
-        cols = 3
+        # Dibujar productos en un grid de 5 columnas para aprovechar el espacio horizontal
+        cols = 5
+        for i in range(cols): self.products_frame.columnconfigure(i, weight=1)
         product_btns = []
         for idx, p in enumerate(filtered):
             r, c = divmod(idx, cols)
             card = ttk.Frame(self.products_frame, bootstyle="light", padding=15)
             card.grid(row=r, column=c, padx=12, pady=12, sticky='nsew')
             
-            ttk.Label(card, text=p[4] or '🍽', font=(None, 40), bootstyle="inverse-light").pack(pady=5)
-            ttk.Label(card, text=p[1], font=(None, 14, 'bold'), bootstyle="inverse-light", wraplength=140, justify='center').pack()
+            img = None
+            img_path = find_product_image_path(p[1])
+            if img_path:
+                img = load_image(img_path, size=(140, 110))
+            
+            if img:
+                lbl = ttk.Label(card, image=img, bootstyle="inverse-light")
+                lbl.image = img
+                lbl.pack(pady=(0, 10))
+            else:
+                ttk.Label(card, text=p[4] or '🍽', font=(None, 60), bootstyle="inverse-light").pack(pady=(0, 10))
+                
+            # Para que el texto sea oscuro sobre el fondo claro
+            tk.Label(card, text=p[1], font=(None, 12, 'bold'), fg='#2b3e50', bg='#f8f9fa', wraplength=120, justify='center').pack(pady=(5, 5))
             price_lbl = f"${p[2]:.2f}"
             if p[5]:
                 price_lbl += f" • {p[5]}m"
-            ttk.Label(card, text=price_lbl, font=(None, 16), bootstyle="info").pack(pady=5)
+            
+            # Etiqueta de precio con fondo oscuro y texto blanco
+            price_box = tk.Label(card, text=price_lbl, font=(None, 14, 'bold'), bg='#2b3e50', fg='white', padx=8, pady=2)
+            price_box.pack(pady=(0, 10))
             
             # Botón para añadir al carrito (más grande)
             btn = ttk.Button(card, text='Añadir', command=lambda pid=p: self.add_product(pid), bootstyle="info", cursor="hand2", takefocus=True, padding=8)
@@ -1384,24 +1899,74 @@ class POSFrame(tk.Canvas):
 
     def add_product(self, product):
         """Agrega un producto a la lista del carrito."""
-        self.cart.append(product)
+        for item in self.cart:
+            if item['product'][0] == product[0]: # mismo ID
+                item['qty'] += 1
+                self.update_cart_display()
+                return
+        self.cart.append({'product': product, 'qty': 1})
         self.update_cart_display()
 
     def remove_selected(self):
         """Elimina el producto seleccionado en la lista del carrito."""
-        sel = self.cart_list.curselection()
+        sel = self.cart_tree_venta.selection()
         if not sel: return
-        idx = sel[0]
+        item_id = sel[0]
+        idx = self.cart_tree_venta.index(item_id)
         del self.cart[idx]
         self.update_cart_display()
 
+    def on_cart_venta_double_click(self, event):
+        """Permite editar la cantidad de un producto directamente en la celda de Venta Directa."""
+        region = self.cart_tree_venta.identify_region(event.x, event.y)
+        if region != "cell": return
+        
+        column = self.cart_tree_venta.identify_column(event.x)
+        if column != "#2": return # Solo permitir editar la columna 'Cant'
+        
+        item_id = self.cart_tree_venta.identify_row(event.y)
+        if not item_id: return
+        
+        idx = self.cart_tree_venta.index(item_id)
+        x, y, width, height = self.cart_tree_venta.bbox(item_id, column)
+        
+        curr_qty = self.cart[idx]['qty']
+        
+        entry = ttk.Entry(self.cart_tree_venta, justify='center')
+        entry.insert(0, str(curr_qty))
+        entry.select_range(0, 'end')
+        entry.focus_set()
+        
+        entry.place(x=x, y=y, width=width, height=height)
+        
+        def save_edit(event=None):
+            try:
+                new_qty = int(entry.get())
+                if new_qty < 1: raise ValueError
+                self.cart[idx]['qty'] = new_qty
+                self.update_cart_display()
+            except ValueError:
+                pass
+            finally:
+                entry.destroy()
+
+        entry.bind('<Return>', save_edit)
+        entry.bind('<FocusOut>', save_edit)
+        entry.bind('<Escape>', lambda e: entry.destroy())
+
     def update_cart_display(self):
         """Refresca la visualización de la lista del carrito y calcula el total."""
-        self.cart_list.delete(0, 'end')
+        for r in self.cart_tree_venta.get_children():
+            self.cart_tree_venta.delete(r)
+        
         total = 0
-        for p in self.cart:
-            self.cart_list.insert('end', f"{p[1]:<20} ${p[2]:>6.2f}")
-            total += p[2]
+        for item in self.cart:
+            p = item['product']
+            qty = item['qty']
+            subtotal = p[2] * qty
+            self.cart_tree_venta.insert('', 'end', values=(p[1], f"x{qty}", f"${p[2]:.2f}", f"${subtotal:.2f}"))
+            total += subtotal
+            
         self.total_label.config(text=f'Total: ${total:.2f}')
 
     def process_order(self):
@@ -1416,21 +1981,21 @@ class POSFrame(tk.Canvas):
             return
         
         # Preparar datos del pedido
-        items_list = [{'id': p[0], 'nombre': p[1], 'precio': p[2]} for p in self.cart]
+        items_list = [{'id': item['product'][0], 'nombre': item['product'][1], 'precio': item['product'][2], 'qty': item['qty']} for item in self.cart]
         items = json.dumps(items_list, ensure_ascii=False)
-        subtotal = sum((p.get('precio') or 0) for p in items_list)
+        subtotal = sum((p.get('precio', 0) * p.get('qty', 1)) for p in items_list)
         total = subtotal
         
         try:
             # Generar número de pedido único basado en fecha/hora
             canal = self.order_channel.get()
-            numero = f"{canal}-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+            numero = f"{canal[:3].upper()}-{datetime.now().strftime('%H%M%S')}"
             created_at = datetime.now().isoformat()
             usuario_id = self.user.get('id') if self.user else None
             sesion_id = self.session_id
-            # Si el pedido es por CAJA, considerarlo pagado inmediatamente
-            pagado = 1 if canal == 'CAJA' else 0
-            metodo_pago = 'EFECTIVO' if canal == 'CAJA' else None
+            # Según requerimiento: Venta Directa NO procesa pago, solo pedido pendiente
+            pagado = 0
+            metodo_pago = None
 
             # Si es CAJA pero no hay sesión abierta, solicitar abrir caja
             if canal == 'CAJA' and not sesion_id:
@@ -1441,7 +2006,7 @@ class POSFrame(tk.Canvas):
             # Calcular duración de preparación del pedido (max de items)
             default_min = int(PREP_DURATION.total_seconds() // 60)
             try:
-                order_prep = max([(p[5] if (len(p) > 5 and p[5] is not None) else default_min) for p in self.cart])
+                order_prep = max([(item['product'][5] if (len(item['product']) > 5 and item['product'][5] is not None) else default_min) for item in self.cart])
             except Exception:
                 order_prep = default_min
 
@@ -1460,10 +2025,41 @@ class POSFrame(tk.Canvas):
                                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
                             (numero, cliente_nombre, cliente_telefono, items, subtotal, 0.0, total, 'RECIBIDO', canal, usuario_id, sesion_id, metodo_pago, pagado, order_prep, created_at))
             
+            # 4. Mandar a imprimir comanda (Ticket de Pedido) automáticamente
+            try:
+                comanda_text = f"*** COMANDA DE PEDIDO ***\n"
+                comanda_text += f"ORDEN: {numero}\n"
+                comanda_text += f"TIPO:  {canal}\n"
+                comanda_text += f"MESA:  {'VENTA DIRECTA' if canal != 'LLEVAR' else 'PARA LLEVAR'}\n"
+                comanda_text += f"FECHA: {datetime.now().strftime('%d/%m/%Y %H:%M')}\n"
+                comanda_text += "-" * 30 + "\n"
+                for it in items_list:
+                    comanda_text += f"{it['qty']:<3} {it['nombre'][:20]}\n"
+                comanda_text += "-" * 30 + "\n"
+                comanda_text += "    CONTROL DE PEDIDO\n"
+
+                cfg = PrinterConfig()
+                printer_name = cfg.resolve_printer("comanda")
+                if printer_name and WIN32_PRINT_AVAILABLE:
+                    import tempfile
+                    fd, path = tempfile.mkstemp(suffix=".txt")
+                    with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                        f.write(comanda_text)
+                    win32api.ShellExecute(0, "printto", path, f'"{printer_name}"', ".", 0)
+                else:
+                    fd, path = tempfile.mkstemp(suffix=".txt")
+                    with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                        f.write(comanda_text)
+                    if sys.platform == "win32":
+                        os.startfile(path, "print")
+            except Exception as print_err:
+                logging.error(f"Error al imprimir comanda: {print_err}")
+
+            messagebox.showinfo('Éxito', f'Pedido {canal} procesado correctamente.\nNúmero: {numero}')
+
             # Registrar en auditoría
             self.db.audit_log('pedidos', 'INSERT', self.user.get('username'), f'Pedido {canal} creado: {numero}', new=items_list)
             
-            messagebox.showinfo('Éxito', f'Pedido {canal} procesado correctamente')
         except Exception as e:
             logging.error(f'Error al procesar pedido POS: {e}')
             messagebox.showerror('Error', 'No se pudo crear el pedido')
@@ -1474,9 +2070,21 @@ class POSFrame(tk.Canvas):
 
     def open_caja(self):
         """Inicia una nueva sesión de caja con un monto inicial."""
+        # Verificar primero en memoria
         if self.session_id:
             messagebox.showinfo('Caja', 'Ya hay una sesión de caja abierta')
             return
+            
+        # Verificar en base de datos por si acaso (evitar duplicados por reinicio)
+        last_session = self.db.fetch_one(
+            "SELECT id FROM caja_sesiones WHERE usuario_id = ? AND estado = 'ABIERTO' ORDER BY id DESC LIMIT 1",
+            (self.user.get('id'),)
+        )
+        if last_session:
+            self.session_id = last_session[0]
+            messagebox.showinfo('Caja', 'Se ha recuperado su sesión de caja abierta anteriormente.')
+            return
+
         inicial = simpledialog.askfloat('Abrir Caja', 'Monto inicial en caja:', minvalue=0.0)
         if inicial is None: return # El usuario canceló el diálogo
         
@@ -1496,79 +2104,110 @@ class POSFrame(tk.Canvas):
         if not self.session_id:
             messagebox.showwarning('Caja', 'No hay sesión de caja abierta')
             return
-        
-        cierre_at = datetime.now().isoformat()
-        # Obtener todas las ventas realizadas en esta sesión
-        rows = self.db.fetch_all('SELECT numero, total, created_at FROM pedidos WHERE sesion_id = ? AND canal = ?', (self.session_id, 'CAJA'))
-        sum_total = sum(float(r[1] or 0) for r in rows)
-
-        # Obtener monto inicial
-        caja_row = self.db.fetch_one('SELECT inicial FROM caja_sesiones WHERE id = ?', (self.session_id,)) or (0.0,)
-        inicial = float(caja_row[0] or 0)
-        
-        # Generar formato de Ticket idéntico al solicitado
-        ahora = datetime.now()
-        fecha_str = ahora.strftime('%d/%m/%Y %H:%M:%S')
-        user_name = self.user.get('username', 'Cajero')
-        user_id = self.user.get('id', 0)
-        
-        lines = []
-        lines.append("*" * 42)
-        lines.append("      INFORME DE CIERRE DE CAJA       ")
-        lines.append("*" * 42)
-        lines.append(f"Cierre:  {fecha_str}")
-        lines.append(f"Cajero:  ID {user_id} - {user_name}")
-        lines.append(f"Caja:    1")
-        lines.append(f"Sesión:  {self.session_id}")
-        lines.append("-" * 42)
-        lines.append(f"{'TICKET':<15} {'FECHA':<20} {'TOTAL':>5}")
-        lines.append("-" * 42)
-        
-        for r in rows:
-            numero = r[0]
-            total = float(r[1] or 0)
-            try:
-                t_str = datetime.fromisoformat(r[2]).strftime('%H:%M:%S')
-            except:
-                t_str = "00:00:00"
-            lines.append(f"{numero:<15} {t_str:<20} {total:>5.2f}")
             
-        lines.append("-" * 42)
-        lines.append(f"{'Total EFECTIVO':<36} {sum_total:>5.2f}")
-        lines.append("=" * 42)
-        lines.append(f"{'Monto Inicial:':<36} {inicial:>5.2f}")
-        lines.append(f"{'Total Ventas Turno:':<36} {sum_total:>5.2f}")
-        lines.append("-" * 42)
-        lines.append(f"{'TOTAL EN CAJA:':<36} {sum_total + inicial:>5.2f}")
-        lines.append("=" * 42)
-        lines.append(f"{'Nº Total de Tickets:':<36} {len(rows):>5}")
-        lines.append("*" * 42)
-        lines.append("      SISTEMA POS PIK'TA - 2026       ")
-        lines.append("*" * 42)
-        
-        reporte_texto = "\n".join(lines)
-        
         try:
-            self.db._ensure_column('caja_sesiones', 'reporte_texto', 'TEXT')
-            # Actualizar estado de la sesión a CERRADO y guardar reporte
-            self.db.execute('UPDATE caja_sesiones SET estado = ?, cierre_total = ?, cierre_at = ?, reporte_texto = ? WHERE id = ?', 
-                            ('CERRADO', sum_total, cierre_at, reporte_texto, self.session_id))
-            messagebox.showinfo('Caja', 'Caja cerrada exitosamente')
-            
-            # Mandar a imprimir el reporte automáticamente
-            if sys.platform == "win32":
-                import tempfile
-                fd, path = tempfile.mkstemp(suffix=".txt")
-                with os.fdopen(fd, 'w', encoding='utf-8') as f:
-                    f.write(reporte_texto)
-                os.startfile(path, "print")
-                
-        except Exception as e:
-            logging.exception('Error al cerrar caja o imprimir ticket')
-            messagebox.showerror('Error', f'Ocurrió un error: {str(e)}')
+            # Reemplazar _ensure_column por un chequeo manual seguro
+            try:
+                columns = self.db.fetch_all("PRAGMA table_info(caja_sesiones)")
+                col_names = [col[1] for col in columns]
+                if 'ingresos_efectivo' not in col_names:
+                    self.db.execute("ALTER TABLE caja_sesiones ADD COLUMN ingresos_efectivo REAL DEFAULT 0")
+                if 'ingresos_otros' not in col_names:
+                    self.db.execute("ALTER TABLE caja_sesiones ADD COLUMN ingresos_otros REAL DEFAULT 0")
+                if 'reporte_texto' not in col_names:
+                    self.db.execute("ALTER TABLE caja_sesiones ADD COLUMN reporte_texto TEXT")
+            except Exception as e:
+                logging.error(f"Error alterando caja_sesiones (seguro continuar): {e}")
 
-        # Mostrar reporte de cierre en la interfaz
-        self.show_report(reporte_texto)
+            cierre_at = datetime.now().isoformat()
+            # Obtener todas las ventas pagadas realizadas en esta sesión
+            rows = self.db.fetch_all('SELECT numero, total, created_at, metodo_pago FROM pedidos WHERE sesion_id = ? AND pagado = 1', (self.session_id,))
+            
+            sum_efectivo = sum(float(r[1] or 0) for r in rows if r[3] == 'EFECTIVO')
+            sum_otros = sum(float(r[1] or 0) for r in rows if r[3] != 'EFECTIVO')
+            sum_total = sum_efectivo + sum_otros
+
+            # Obtener monto inicial
+            caja_row = self.db.fetch_one('SELECT inicial FROM caja_sesiones WHERE id = ?', (self.session_id,)) or (0.0,)
+            inicial = float(caja_row[0] or 0)
+            
+            # Generar formato de Ticket idéntico al solicitado
+            ahora = datetime.now()
+            fecha_str = ahora.strftime('%d/%m/%Y %H:%M:%S')
+            user_name = self.user.get('username', 'Cajero')
+            user_id = self.user.get('id', 0)
+            
+            lines = []
+            lines.append("*" * 42)
+            lines.append("      INFORME DE CIERRE DE CAJA       ")
+            lines.append("*" * 42)
+            lines.append(f"Cierre:  {fecha_str}")
+            lines.append(f"Cajero:  ID {user_id} - {user_name}")
+            lines.append(f"Caja:    1")
+            lines.append(f"Sesión:  {self.session_id}")
+            lines.append("-" * 42)
+            lines.append(f"{'TICKET':<15} {'FECHA':<20} {'TOTAL':>5}")
+            lines.append("-" * 42)
+            
+            for r in rows:
+                numero = r[0]
+                total = float(r[1] or 0)
+                try:
+                    t_str = datetime.fromisoformat(r[2]).strftime('%H:%M:%S')
+                except Exception:
+                    t_str = "00:00:00"
+                lines.append(f"{numero:<15} {t_str:<20} {total:>5.2f}")
+                
+            lines.append("-" * 42)
+            lines.append(f"{'Total EFECTIVO':<36} {sum_efectivo:>5.2f}")
+            if sum_otros > 0:
+                lines.append(f"{'Total OTROS (Tarj/Transf)':<36} {sum_otros:>5.2f}")
+            lines.append("=" * 42)
+            lines.append(f"{'Monto Inicial:':<36} {inicial:>5.2f}")
+            lines.append(f"{'Total Ventas Turno:':<36} {sum_total:>5.2f}")
+            lines.append("-" * 42)
+            lines.append(f"{'TOTAL EN CAJA (Efectivo):':<36} {sum_efectivo + inicial:>5.2f}")
+            lines.append("=" * 42)
+            lines.append(f"{'Nº Total de Tickets:':<36} {len(rows):>5}")
+            lines.append("*" * 42)
+            lines.append("      SISTEMA POS PIK'TA - 2026       ")
+            lines.append("*" * 42)
+            
+            reporte_texto = "\n".join(lines)
+            
+            try:
+                # Actualizar estado de la sesión a CERRADO y guardar reporte
+                self.db.execute('UPDATE caja_sesiones SET estado = ?, cierre_total = ?, cierre_at = ?, reporte_texto = ?, ingresos_efectivo = ?, ingresos_otros = ? WHERE id = ?', 
+                                ('CERRADO', sum_total, cierre_at, reporte_texto, sum_efectivo, sum_otros, self.session_id))
+                
+                # Abrir cajón al cierre
+                self.open_cash_drawer()
+                
+                messagebox.showinfo('Caja', 'Caja cerrada exitosamente')
+                
+                # Mandar a imprimir el reporte automáticamente (solo si el cierre fue exitoso)
+                if sys.platform == "win32":
+                    try:
+                        import tempfile
+                        fd, path = tempfile.mkstemp(suffix=".txt")
+                        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                            f.write(reporte_texto)
+                        cfg = PrinterConfig()
+                        printer_name = cfg.resolve_printer("cierre")
+                        if printer_name and WIN32_PRINT_AVAILABLE:
+                            win32api.ShellExecute(0, "printto", path, f'"{printer_name}"', ".", 0)
+                        else:
+                            os.startfile(path, "print")
+                    except Exception as print_err:
+                        logging.error(f"Error al imprimir reporte de cierre: {print_err}")
+            except Exception as e:
+                logging.error(f"Error al actualizar la base de datos durante el cierre: {e}")
+                messagebox.showerror('Error', f"Error al guardar cierre de caja: {e}")
+        except Exception as e:
+            logging.exception('Error general en cierre de caja o imprimir ticket')
+            messagebox.showerror('Error', f'Error general al cerrar la caja: {str(e)}')
+
+        # Limpiar la sesión actual (no mostramos el reporte en pantalla, solo se imprime y guarda)
         self.session_id = None
 
     def show_report(self, text):
@@ -1585,14 +2224,25 @@ class POSFrame(tk.Canvas):
         ttk.Button(frm, text='Regresar al Menú', command=self.render_products, bootstyle="info").pack(pady=10)
 
     def notify_order_ready(self, text='¡Pedido Listo!'):
-        """Muestra un indicador visual temporal en la cabecera para notificar pedidos listos."""
+        """Muestra un indicador visual temporal en la cabecera para notificar pedidos listos y reproduce sonido."""
         try:
+            # Reproducir sonido nativo en Windows
+            try:
+                import ctypes
+                sound_path = os.path.abspath(os.path.join('Imagenes', 'sonidos y alertas', 'Sonido de_ Campana de servicio.mp3'))
+                if os.path.exists(sound_path) and sys.platform == "win32":
+                    ctypes.windll.winmm.mciSendStringW('close myalert', None, 0, None)
+                    ctypes.windll.winmm.mciSendStringW(f'open "{sound_path}" type mpegvideo alias myalert', None, 0, None)
+                    ctypes.windll.winmm.mciSendStringW('play myalert', None, 0, None)
+            except Exception as e:
+                logging.error(f"Error reproduciendo alerta: {e}")
+
             # Evitar duplicados
             if hasattr(self, '_notify_lbl') and getattr(self, '_notify_lbl') and str(getattr(self, '_notify_lbl')):
                 try:
                     self._notify_lbl.config(text=text)
                     return
-                except: pass
+                except Exception: pass
 
             self._notify_lbl = ttk.Label(self.header, text=text, bootstyle='danger', padding=8)
             self._notify_lbl.pack(side='right', padx=5)
@@ -1605,7 +2255,7 @@ class POSFrame(tk.Canvas):
                         try:
                             self._notify_lbl.destroy()
                             delattr(self, '_notify_lbl')
-                        except:
+                        except Exception:
                             pass
                         return
                     current = self._notify_lbl.winfo_viewable()
@@ -1677,11 +2327,11 @@ class MeseroFrame(tk.Canvas):
 
         # --- Cuerpo ---
         # Lado izquierdo: Mesas y Productos
-        left = ttk.Frame(self.body)
-        left.pack(side='left', fill='both', expand=True, padx=(0, 10))
+        self.left = ttk.Frame(self.body)
+        self.left.pack(side='left', fill='both', expand=True, padx=(0, 10))
 
         # Selección de Mesa / Para Llevar
-        mesa_frame = ttk.LabelFrame(left, text="Seleccionar Mesa / Destino")
+        mesa_frame = tk.LabelFrame(self.left, text="Seleccionar Mesa / Destino", bg=BG, fg="white", font=(None, 11, "bold"))
         mesa_frame.pack(fill='x', pady=(0, 15), padx=10)
         
         mesas = ["Mesa 1", "Mesa 2", "Mesa 3", "Mesa 4", "Mesa 5", "Mesa 6", "Para Llevar"]
@@ -1689,36 +2339,76 @@ class MeseroFrame(tk.Canvas):
             ttk.Radiobutton(mesa_frame, text=m, variable=self.selected_mesa, value=m, 
                            bootstyle="warning-toolbutton", padding=8).pack(side='left', padx=5)
 
-        # Filtro de categorías
-        self.categories = ['🍔 Combos', '🍟 Extras', '🥤 Bebidas']
+        # Filtro de categorías dinámico
+        self.categories = [row[0] for row in self.db.fetch_all('SELECT DISTINCT categoria FROM productos_menu WHERE categoria IS NOT NULL')]
+        if not self.categories: self.categories = ['General']
         self.selected_category = tk.StringVar(value=self.categories[0])
-        cat_frame = ttk.Frame(left)
-        cat_frame.pack(fill='x', pady=(0, 15))
+        self.cat_frame = ttk.Frame(self.left)
+        self.cat_frame.pack(fill='x', pady=(0, 15))
+        self.refresh_category_buttons()
+
+    def refresh_category_buttons(self):
+        for child in self.cat_frame.winfo_children():
+            child.destroy()
+        
+        # Recargar de la BD
+        self.categories = [row[0] for row in self.db.fetch_all('SELECT DISTINCT categoria FROM productos_menu WHERE categoria IS NOT NULL')]
+        if not self.categories: self.categories = ['General']
+        if self.selected_category.get() not in self.categories:
+            self.selected_category.set(self.categories[0])
+
         for c in self.categories:
-            ttk.Radiobutton(cat_frame, text=c, variable=self.selected_category, value=c, 
+            ttk.Radiobutton(self.cat_frame, text=c, variable=self.selected_category, value=c, 
                            command=self.render_products, bootstyle="warning-outline-toolbutton", padding=10).pack(side='left', padx=5)
 
         # Contenedor de productos
-        self.products_canvas = tk.Canvas(left, bg=BG, highlightthickness=0)
-        self.scrollbar = ttk.Scrollbar(left, orient="vertical", command=self.products_canvas.yview)
+        products_wrapper = ttk.Frame(self.left)
+        products_wrapper.pack(side="left", fill="both", expand=True)
+        
+        self.products_canvas = tk.Canvas(products_wrapper, bg=BG, highlightthickness=0)
+        self.scrollbar = AutoScrollbar(products_wrapper, orient="vertical", command=self.products_canvas.yview)
         self.products_frame = ttk.Frame(self.products_canvas)
 
         self.products_frame.bind("<Configure>", lambda e: self.products_canvas.configure(scrollregion=self.products_canvas.bbox("all")))
-        self.products_canvas.create_window((0, 0), window=self.products_frame, anchor="nw")
+        self.products_frame_id = self.products_canvas.create_window((0, 0), window=self.products_frame, anchor="nw")
+        self.products_canvas.bind('<Configure>', lambda e: self.products_canvas.itemconfig(self.products_frame_id, width=e.width))
         self.products_canvas.configure(yscrollcommand=self.scrollbar.set)
-        self.products_canvas.pack(side="left", fill="both", expand=True)
-        self.scrollbar.pack(side="right", fill="y")
+        
+        self.products_canvas.grid(row=0, column=0, sticky="nsew")
+        self.scrollbar.grid(row=0, column=1, sticky="ns")
+        products_wrapper.columnconfigure(0, weight=1)
+        products_wrapper.rowconfigure(0, weight=1)
 
         # Lado derecho: Resumen
-        right = ttk.Frame(self.body, width=350, bootstyle="secondary")
+        right = ttk.Frame(self.body, width=500, bootstyle="secondary")
         right.pack(side='right', fill='y')
         right.pack_propagate(False)
         
         ttk.Label(right, text='PEDIDO ACTUAL', font=(None, 12, 'bold'), bootstyle="inverse-secondary", padding=10).pack(fill='x')
-        self.cart_list = tk.Listbox(right, bg=PANEL, fg=FG, font=(None, 11), bd=0, highlightthickness=0, selectbackground=ACCENT)
-        self.cart_list.pack(fill='both', expand=True, padx=10, pady=10)
+        
+        # --- Treeview para Pedido de Mesero ---
+        tree_frame_mesero = ttk.Frame(right)
+        tree_frame_mesero.pack(fill='both', expand=True, padx=10, pady=10)
+        
+        cols_mesero = ('Producto', 'Cant', 'Precio', 'Subtotal')
+        self.cart_tree_mesero = ttk.Treeview(tree_frame_mesero, columns=cols_mesero, show='headings')
+        for col in cols_mesero:
+            self.cart_tree_mesero.heading(col, text=col)
+            self.cart_tree_mesero.column(col, anchor='center', width=60)
+        self.cart_tree_mesero.column('Producto', width=200, anchor='w')
+        self.cart_tree_mesero.pack(side='left', fill='both', expand=True)
+        
+        cart_scroll_mesero = ttk.Scrollbar(tree_frame_mesero, orient='vertical', command=self.cart_tree_mesero.yview)
+        self.cart_tree_mesero.configure(yscrollcommand=cart_scroll_mesero.set)
+        cart_scroll_mesero.pack(side='right', fill='y')
+        
+        self.cart_tree_mesero.bind("<Double-1>", self.on_cart_mesero_double_click)
+        
         self.total_label = ttk.Label(right, text='Total: $0.00', font=(None, 14, 'bold'), bootstyle="inverse-secondary", padding=10)
         self.total_label.pack(fill='x')
+
+        self.is_to_go = tk.BooleanVar(value=False)
+        ttk.Checkbutton(right, text="Marcar productos como PARA LLEVAR", variable=self.is_to_go, bootstyle="warning-round-toggle").pack(pady=5, padx=10, anchor='w')
 
         ttk.Button(right, text='Quitar Item', command=self.remove_selected, bootstyle="danger", cursor="hand2").pack(fill='x', padx=10, pady=5)
         ttk.Button(right, text='ENVIAR A COCINA', command=self.process_order, bootstyle="warning", cursor="hand2", padding=10).pack(fill='x', padx=10, pady=10)
@@ -1729,14 +2419,27 @@ class MeseroFrame(tk.Canvas):
         for w in self.products_frame.winfo_children(): w.destroy()
         products = self.db.fetch_all('SELECT id, nombre, precio, categoria, emoji, prep_duration FROM productos_menu')
         filtered = [p for p in products if (p[3] or '').strip() == self.selected_category.get()]
-        
-        cols = 3
+        # Usar 5 columnas para aprovechar el espacio horizontal y evitar scroll innecesario
+        cols = 5
+        for i in range(cols): self.products_frame.columnconfigure(i, weight=1)
         product_btns = []
         for idx, p in enumerate(filtered):
             r, c = divmod(idx, cols)
             card = ttk.Frame(self.products_frame, bootstyle="light", padding=15)
             card.grid(row=r, column=c, padx=12, pady=12, sticky='nsew')
-            ttk.Label(card, text=p[4] or '🍽', font=(None, 40), bootstyle="inverse-light").pack(pady=5)
+            
+            img = None
+            img_path = find_product_image_path(p[1])
+            if img_path:
+                img = load_image(img_path, size=(140, 110))
+            
+            if img:
+                lbl = ttk.Label(card, image=img, bootstyle="inverse-light")
+                lbl.image = img
+                lbl.pack(pady=(0, 10))
+            else:
+                ttk.Label(card, text=p[4] or '🍽', font=(None, 60), bootstyle="inverse-light").pack(pady=(0, 10))
+                
             ttk.Label(card, text=p[1], font=(None, 14, 'bold'), bootstyle="inverse-light", wraplength=140, justify='center').pack()
             price_lbl = f"${p[2]:.2f}"
             if p[5]:
@@ -1764,20 +2467,72 @@ class MeseroFrame(tk.Canvas):
         for i in range(cols): self.products_frame.columnconfigure(i, weight=1)
 
     def add_product(self, product):
-        self.cart.append(product)
+        for item in self.cart:
+            if item['product'][0] == product[0]: # mismo ID
+                item['qty'] += 1
+                self.update_cart_display()
+                return
+        self.cart.append({'product': product, 'qty': 1})
         self.update_cart_display()
 
     def remove_selected(self):
-        sel = self.cart_list.curselection()
+        sel = self.cart_tree_mesero.selection()
         if not sel: return
-        del self.cart[sel[0]]
+        item_id = sel[0]
+        idx = self.cart_tree_mesero.index(item_id)
+        del self.cart[idx]
         self.update_cart_display()
 
+    def on_cart_mesero_double_click(self, event):
+        """Permite editar la cantidad de un producto directamente en la celda."""
+        region = self.cart_tree_mesero.identify_region(event.x, event.y)
+        if region != "cell": return
+        
+        column = self.cart_tree_mesero.identify_column(event.x)
+        if column != "#2": return # Solo permitir editar la columna 'Cant'
+        
+        item_id = self.cart_tree_mesero.identify_row(event.y)
+        if not item_id: return
+        
+        idx = self.cart_tree_mesero.index(item_id)
+        x, y, width, height = self.cart_tree_mesero.bbox(item_id, column)
+        
+        curr_qty = self.cart[idx]['qty']
+        
+        entry = ttk.Entry(self.cart_tree_mesero, justify='center')
+        entry.insert(0, str(curr_qty))
+        entry.select_range(0, 'end')
+        entry.focus_set()
+        
+        entry.place(x=x, y=y, width=width, height=height)
+        
+        def save_edit(event=None):
+            try:
+                new_qty = int(entry.get())
+                if new_qty < 1: raise ValueError
+                self.cart[idx]['qty'] = new_qty
+                self.update_cart_display()
+            except ValueError:
+                pass
+            finally:
+                entry.destroy()
+
+        entry.bind('<Return>', save_edit)
+        entry.bind('<FocusOut>', save_edit)
+        entry.bind('<Escape>', lambda e: entry.destroy())
+
     def update_cart_display(self):
-        self.cart_list.delete(0, 'end')
-        total = sum(p[2] for p in self.cart)
-        for p in self.cart:
-            self.cart_list.insert('end', f"{p[1]:<20} ${p[2]:>6.2f}")
+        for r in self.cart_tree_mesero.get_children():
+            self.cart_tree_mesero.delete(r)
+            
+        total = 0
+        for item in self.cart:
+            p = item['product']
+            qty = item['qty']
+            subtotal = p[2] * qty
+            self.cart_tree_mesero.insert('', 'end', values=(p[1], f"x{qty}", f"${p[2]:.2f}", f"${subtotal:.2f}"))
+            total += subtotal
+            
         self.total_label.config(text=f'Total: ${total:.2f}')
 
     def process_order(self):
@@ -1785,46 +2540,132 @@ class MeseroFrame(tk.Canvas):
             messagebox.showinfo('Aviso', 'El pedido está vacío')
             return
         
-        items_list = [{'id': p[0], 'nombre': p[1], 'precio': p[2]} for p in self.cart]
-        items = json.dumps(items_list, ensure_ascii=False)
-        total = sum(p[2] for p in self.cart)
-        mesa = self.selected_mesa.get()
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                mesa = self.selected_mesa.get()
+                to_go_suffix = " (Para Llevar)" if hasattr(self, 'is_to_go') and self.is_to_go.get() else ""
+                items_list = [{'id': item['product'][0], 'nombre': item['product'][1] + to_go_suffix, 
+                              'precio': item['product'][2], 'qty': item['qty']} for item in self.cart]
+                total = sum((p.get('precio', 0) * p.get('qty', 1)) for p in items_list)
+                
+                # Usar transacción con bloqueo
+                with self.db.get_connection() as conn:
+                    conn.execute("BEGIN IMMEDIATE")  # Lock exclusivo
+                    cur = conn.cursor()
+                    
+                    # Buscar pedido existente con bloqueo FOR UPDATE
+                    if mesa != "Para Llevar":
+                        cur.execute("""
+                            SELECT id, items, total, estado FROM pedidos 
+                            WHERE mesa=? AND pagado=0 AND estado != 'PAGADO' 
+                            ORDER BY created_at DESC LIMIT 1 
+                        """, (mesa,))
+                        unpaid_order = cur.fetchone()
+                    else:
+                        unpaid_order = None
+                    
+                    if unpaid_order:
+                        order_id = unpaid_order[0]
+                        current_items = json.loads(unpaid_order[1])
+                        estado_actual = unpaid_order[3]
+                        
+                        if estado_actual == 'LISTO':
+                            for item in items_list:
+                                item['nombre'] = item['nombre'] + " (EXTRA)"
+                        
+                        updated_items = current_items + items_list
+                        new_total = sum(p.get('precio', p.get('precio_unitario', 0)) * p.get('qty', p.get('cantidad', 1)) for p in updated_items)
+                        
+                        cur.execute("""
+                            UPDATE pedidos SET items=?, subtotal=?, total=? 
+                            WHERE id=? AND estado=?
+                        """, (json.dumps(updated_items, ensure_ascii=False), new_total, new_total, order_id, estado_actual))
+                        
+                        if cur.rowcount == 0:
+                            # Conflicto - otro usuario modificó el pedido
+                            conn.rollback()
+                            if attempt < max_retries - 1:
+                                time.sleep(0.1)
+                                continue
+                            else:
+                                raise Exception("El pedido fue modificado por otro usuario. Intente nuevamente.")
+                        
+                        # Si está LISTO, crear ticket extra
+                        if estado_actual == 'LISTO':
+                            items_kds = json.dumps(items_list, ensure_ascii=False)
+                            numero = f"EX-{datetime.now().strftime('%H%M%S')}"
+                            created_at = datetime.now().isoformat()
+                            usuario_id = self.user.get('id') if self.user else None
+                            default_min = int(PREP_DURATION.total_seconds() // 60)
+                            try:
+                                order_prep = max([(item['product'][5] if (len(item['product']) > 5 and item['product'][5] is not None) else default_min) for item in self.cart])
+                            except Exception:
+                                order_prep = default_min
+                            
+                            cur.execute("""
+                                INSERT INTO pedidos 
+                                (numero, items, subtotal, total, estado, canal, usuario_id, created_at, mesa, pagado, preparacion_duracion) 
+                                VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                            """, (numero, items_kds, 0, 0, 'RECIBIDO', 'EXTRA', usuario_id, created_at, mesa, 1, order_prep))
+                        
+                        conn.commit()
+                        messagebox.showinfo('Éxito', f'Productos añadidos exitosamente al pedido existente de la {mesa}')
+                        break
+                        
+                    else:
+                        # Crear nuevo pedido (código existente)
+                        numero = f"ME-{datetime.now().strftime('%H%M%S')}"
+                        items = json.dumps(items_list, ensure_ascii=False)
+                        created_at = datetime.now().isoformat()
+                        usuario_id = self.user.get('id') if self.user else None
+                        
+                        # Calcular duración de preparación del pedido
+                        default_min = int(PREP_DURATION.total_seconds() // 60)
+                        try:
+                            order_prep = max([(item['product'][5] if (len(item['product']) > 5 and item['product'][5] is not None) else default_min) for item in self.cart])
+                        except Exception:
+                            order_prep = default_min
+            
+                        cur.execute("""
+                            INSERT INTO pedidos 
+                            (numero, items, subtotal, total, estado, canal, usuario_id, created_at, mesa, pagado, preparacion_duracion) 
+                            VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                        """, (numero, items, total, total, 'RECIBIDO', 'MESERO', usuario_id, created_at, mesa, 0, order_prep))
+                        
+                        conn.commit()
+                        messagebox.showinfo('Éxito', f'Pedido de {mesa} enviado a cocina')
+                        break
+                        
+            except sqlite3.OperationalError as e:
+                if "database is locked" in str(e) and attempt < max_retries - 1:
+                    time.sleep(0.1 * (attempt + 1))  # Backoff exponencial
+                    continue
+                messagebox.showerror('Error', f'Error de base de datos: {e}')
+                return
+            except Exception as e:
+                logging.error(f'Error al procesar pedido mesero: {e}')
+                messagebox.showerror('Error', 'No se pudo enviar el pedido')
+                return
         
+        # Limpiar carrito después de éxito
+        if hasattr(self, 'is_to_go'):
+            self.is_to_go.set(False)
+        self.cart.clear()
+        self.update_cart_display()
+        
+        # Notificar a POS
         try:
-            numero = f"MES-{datetime.now().strftime('%Y%m%d%H%M%S')}"
-            created_at = datetime.now().isoformat()
-            usuario_id = self.user.get('id') if self.user else None
-            
-            # Calcular duración de preparación del pedido (max de items)
-            default_min = int(PREP_DURATION.total_seconds() // 60)
-            try:
-                order_prep = max([(p[5] if (len(p) > 5 and p[5] is not None) else default_min) for p in self.cart])
-            except Exception:
-                order_prep = default_min
-
-            # Los pedidos de mesero se guardan como NO PAGADOS para que caja los cobre luego
-            self.db.execute('INSERT INTO pedidos (numero, items, subtotal, total, estado, canal, usuario_id, created_at, mesa, pagado, preparacion_duracion) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
-                            (numero, items, total, total, 'RECIBIDO', 'MESERO', usuario_id, created_at, mesa, 0, order_prep))
-            
-            messagebox.showinfo('Éxito', f'Pedido de {mesa} enviado a cocina')
-            self.cart.clear()
-            self.update_cart_display()
-
-            # Intentar notificar a la pestaña POS para que refresque la lista de cobros
-            try:
-                app = self.winfo_toplevel()
-                if hasattr(app, 'notebook'):
-                    for i in range(app.notebook.index('end')):
-                        if app.notebook.tab(i, 'text') == 'Caja / POS':
-                            pos_frame = app.nametowidget(app.notebook.tabs()[i])
-                            if hasattr(pos_frame, 'refresh_unpaid_orders'):
-                                pos_frame.refresh_unpaid_orders()
-                            break
-            except Exception:
-                logging.exception('Error notificando POS sobre nuevo pedido Mesero')
-        except Exception as e:
-            logging.error(f'Error al procesar pedido mesero: {e}')
-            messagebox.showerror('Error', 'No se pudo enviar el pedido')
+            app = self.winfo_toplevel()
+            if hasattr(app, 'notebook'):
+                for i in range(app.notebook.index('end')):
+                    if app.notebook.tab(i, 'text') == 'Caja / POS':
+                        pos_frame = app.nametowidget(app.notebook.tabs()[i])
+                        if hasattr(pos_frame, 'refresh_unpaid_orders'):
+                            pos_frame.refresh_unpaid_orders()
+                        break
+        except Exception:
+            logging.exception('Error notificando POS')
 
 
 class KDSFrame(tk.Canvas):
@@ -1906,7 +2747,7 @@ class KDSFrame(tk.Canvas):
     def auto_refresh_loop(self):
         """Ciclo automático para actualizar los temporizadores y buscar nuevos pedidos."""
         self.refresh()
-        self.after(5000, self.auto_refresh_loop) # Actualiza cada 5 segundos
+        self.after(5000, self.auto_refresh_loop) # Actualiza cada 5 segundos para reducir lag en Nube
 
     def refresh(self):
         """Consulta la base de datos y actualiza o crea las tarjetas de los pedidos."""
@@ -1919,15 +2760,38 @@ class KDSFrame(tk.Canvas):
         self.last_order_count = len(rows)
         
         current_ids = set()
+        any_order_delayed = False
         
         for r in rows:
             pid = r[0]
             current_ids.add(pid)
             
+            # Verificar si el pedido está retrasado
+            if r[3] == 'PREPARANDO' and r[5]:
+                try:
+                    started = datetime.fromisoformat(r[5])
+                    elapsed = datetime.now() - started
+                    dur_min = r[6] if r[6] is not None else int(PREP_DURATION.total_seconds()//60)
+                    if (timedelta(minutes=dur_min) - elapsed).total_seconds() <= 0:
+                        any_order_delayed = True
+                except Exception: pass
+            
             if pid not in self.cards:
                 self._create_card(r)
             else:
                 self._update_card(pid, r)
+                
+        # Lógica para la alarma continua
+        if any_order_delayed and not getattr(self, 'is_playing_alert', False):
+            try:
+                play_sound_delayed_order()
+                self.is_playing_alert = True
+            except Exception: pass
+        elif not any_order_delayed and getattr(self, 'is_playing_alert', False):
+            try:
+                stop_sound_delayed_order()
+                self.is_playing_alert = False
+            except Exception: pass
                 
         # Limpiar tarjetas de pedidos que ya no están (ej. pasaron a LISTO)
         for pid in list(self.cards.keys()):
@@ -1949,8 +2813,8 @@ class KDSFrame(tk.Canvas):
         # Parse items
         try:
             items_obj = json.loads(items_str) if items_str else []
-            item_names = '\n'.join([f"• {it.get('qty', 1)}x {it.get('nombre')}" for it in items_obj])
-        except:
+            item_names = '\n'.join([f"• {it.get('qty', it.get('cantidad', 1))}x {it.get('nombre')}" for it in items_obj])
+        except Exception:
             item_names = items_str or "Sin detalles"
             
         mesa_info = f"MESA: {mesa}" if mesa else "PARA LLEVAR / CAJA"
@@ -2005,7 +2869,7 @@ class KDSFrame(tk.Canvas):
         # para que no sea tan "escandaloso"
         header_style = "secondary"
 
-        if estado == 'RECIBIDO':
+        if estado in ('RECIBIDO', 'COBRADO'):
             header_style = "info" # Celeste suave para la cabecera
             time_info = "Esperando..."
             btn_text = "▶ INICIAR PREPARACIÓN"
@@ -2033,7 +2897,7 @@ class KDSFrame(tk.Canvas):
                         mins = int(remaining.total_seconds() // 60)
                         secs = int(remaining.total_seconds() % 60)
                         time_info = f"⏳ Quedan: {mins}m {secs}s"
-                except:
+                except Exception:
                     time_info = "Error de tiempo"
 
         # Aplicar colores sutiles
@@ -2043,8 +2907,15 @@ class KDSFrame(tk.Canvas):
         widgets['lbl_title'].config(bootstyle=f"inverse-{header_style}")
         widgets['lbl_timer'].config(text=time_info, bootstyle=f"inverse-{header_style}")
         
-        # Asegurarse de que el texto interior use el mismo color base oscuro
-        widgets['lbl_items'].config(bootstyle="inverse-secondary")
+        # Actualizar los items en caso de que se hayan agregado productos extra
+        try:
+            items_obj = json.loads(items_str) if items_str else []
+            item_names = '\n'.join([f"• {it.get('qty', it.get('cantidad', 1))}x {it.get('nombre')}" for it in items_obj])
+        except Exception:
+            item_names = items_str or "Sin detalles"
+            
+        # Asegurarse de que el texto interior use el mismo color base oscuro y esté actualizado
+        widgets['lbl_items'].config(text=item_names, bootstyle="inverse-secondary")
         
         # Botón
         widgets['btn_action'].config(text=btn_text, bootstyle=btn_style, command=btn_cmd)
@@ -2052,11 +2923,17 @@ class KDSFrame(tk.Canvas):
     def _advance_single_order(self, pid, current_state, prep_dur):
         """Avanza un pedido individual a su siguiente estado."""
         try:
-            # Prevenir doble clic rápido (Debounce)
+            # Prevenir doble clic robusto (Debounce)
+            import time
+            if not hasattr(self, '_last_click'): self._last_click = {}
+            now = time.time()
+            if pid in self._last_click and now - self._last_click[pid] < 1.5:
+                return
+            self._last_click[pid] = now
+
             if pid in self.cards:
                 self.cards[pid]['btn_action'].config(state='disabled')
-                # Rehabilitar después de 1 segundo si la tarjeta aún existe
-                self.after(1000, lambda p=pid: self.cards[p]['btn_action'].config(state='normal') if p in self.cards else None)
+                self.after(1500, lambda p=pid: self.cards[p]['btn_action'].config(state='normal') if hasattr(self, 'cards') and p in self.cards else None)
 
             res = self.db.fetch_one("SELECT numero, estado FROM pedidos WHERE id=?", (pid,))
             if not res: return
@@ -2064,7 +2941,7 @@ class KDSFrame(tk.Canvas):
             actual_state = res[1]
 
             # Solo avanzar si el estado en la BD coincide (evita saltos por clics acumulados)
-            if current_state == 'RECIBIDO' and actual_state == 'RECIBIDO':
+            if current_state == 'RECIBIDO' and actual_state in ('RECIBIDO', 'COBRADO'):
                 new_state = 'PREPARANDO'
                 started_at = datetime.now().isoformat()
                 default_min = int(PREP_DURATION.total_seconds() // 60)
@@ -2075,7 +2952,7 @@ class KDSFrame(tk.Canvas):
                 new_state = 'LISTO'
                 self.db.execute('UPDATE pedidos SET estado=? WHERE id=?', (new_state, pid))
                 try: play_sound_order_ready()
-                except: pass
+                except Exception: pass
                 
                 # Notificar al POS
                 try:
@@ -2088,9 +2965,9 @@ class KDSFrame(tk.Canvas):
                                     pos_frame.refresh_unpaid_orders()
                                     if hasattr(pos_frame, 'notify_order_ready'):
                                         try: pos_frame.notify_order_ready(f'Pedido Listo: {numero}')
-                                        except: pass
+                                        except Exception: pass
                                     try: play_sound_order_ready()
-                                    except: pass
+                                    except Exception: pass
                                 break
                 except Exception as e:
                     logging.exception('Error notificando POS: ' + str(e))
@@ -2170,7 +3047,7 @@ class WhatsAppFrame(tk.Canvas):
                   command=self.connect_wa, padding=15).pack(pady=20)
         
         # --- PRUEBA DE SONIDOS ---
-        test_frame = ttk.LabelFrame(info_container, text="Pruebas de Sonido del Sistema")
+        test_frame = tk.LabelFrame(info_container, text="Pruebas de Sonido del Sistema", bg=BG, fg="white", font=(None, 11, "bold"))
         test_frame.pack(pady=10, fill='x')
         
         # Usamos un frame interno para el padding ya que LabelFrame no lo soporta directamente en algunas versiones
@@ -2256,6 +3133,9 @@ class AdminFrame(tk.Canvas):
         self.title_lbl = ttk.Label(self.header, text='📊 PANEL DE ADMINISTRACIÓN', font=(None, 24, 'bold'), bootstyle="inverse-success")
         self.title_lbl.pack(side='left', padx=10)
         
+        # Insertar botones de mantenimiento al lado del título
+        self.setup_admin_tools(self.header)
+        
         self.btn_back_main = ttk.Button(self.header, text='Regresar', command=lambda: self.master.select(0), bootstyle="light-outline", cursor="hand2", padding=10)
         self.btn_back_main.pack(side='right', padx=5)
         self.btn_back_main.bind('<Return>', lambda e: self.master.select(0))
@@ -2297,19 +3177,253 @@ class AdminFrame(tk.Canvas):
         self.notebook.add(self.cierre_history_frame, text='Historial de Cierres')
         self.setup_cierre_history()
 
+        # 7. Pestaña de Historial de Facturas (Reimpresión)
+        self.ventas_history_frame = ttk.Frame(self.notebook, padding=20)
+        self.notebook.add(self.ventas_history_frame, text='Historial de Facturas')
+        self.setup_ventas_history()
+
+        # 8. Pestaña de Publicidad
+        self.publicidad_frame = ttk.Frame(self.notebook, padding=20)
+        self.notebook.add(self.publicidad_frame, text='Publicidad')
+        self.setup_publicidad()
+
         self.show_admin_menu() # Mostrar el menú de cuadritos al inicio
+
+    def setup_publicidad(self):
+        """Crea la interfaz para gestionar las imágenes de publicidad."""
+        # Top Header
+        header = ttk.Frame(self.publicidad_frame)
+        header.pack(fill='x', pady=(0, 20))
+        ttk.Label(header, text='Gestión de Pantalla TV (Publicidad)', font=(None, FONT_SIZE_XL, 'bold')).pack(side='left')
+
+        # Main Layout
+        content = ttk.Frame(self.publicidad_frame)
+        content.pack(fill='both', expand=True)
+
+        # Left side: List of images
+        left_panel = tk.LabelFrame(content, text="Imágenes Actuales", bg=BG, fg="white", font=(None, 11, "bold"))
+        left_panel.pack(side='left', fill='both', expand=True, padx=(0, 10), ipadx=15, ipady=15)
+
+        # Treeview para imágenes
+        columns = ('nombre', 'tamano', 'fecha')
+        self.ads_tree = ttk.Treeview(left_panel, columns=columns, show='headings', bootstyle="info")
+        self.ads_tree.heading('nombre', text='Nombre de Archivo')
+        self.ads_tree.heading('tamano', text='Tamaño (KB)')
+        self.ads_tree.heading('fecha', text='Fecha Modificación')
+        self.ads_tree.column('nombre', width=200)
+        self.ads_tree.column('tamano', width=100)
+        self.ads_tree.column('fecha', width=150)
+        
+        vsb = ttk.Scrollbar(left_panel, orient="vertical", command=self.ads_tree.yview)
+        self.ads_tree.configure(yscrollcommand=vsb.set)
+        self.ads_tree.pack(side='left', fill='both', expand=True)
+        vsb.pack(side='left', fill='y')
+
+        # Right side: Actions & Preview
+        right_panel = ttk.Frame(content, width=300)
+        right_panel.pack(side='right', fill='y')
+        right_panel.pack_propagate(False)
+
+        actions_frame = tk.LabelFrame(right_panel, text="Acciones", bg=BG, fg="white", font=(None, 11, "bold"))
+        actions_frame.pack(fill='x', pady=(0, 20), ipadx=15, ipady=15)
+
+        ttk.Button(actions_frame, text='Cargar Nueva Imagen', bootstyle="success",
+                   command=self.upload_ad_image, width=20).pack(pady=5, fill='x')
+        ttk.Button(actions_frame, text='Eliminar Seleccionada', bootstyle="danger",
+                   command=self.delete_ad_image, width=20).pack(pady=5, fill='x')
+        ttk.Button(actions_frame, text='Refrescar Lista', bootstyle="secondary",
+                   command=self.refresh_ads_list, width=20).pack(pady=5, fill='x')
+
+        self.ad_preview_lbl = ttk.Label(right_panel, text="[Vista Previa]", anchor='center')
+        self.ad_preview_lbl.pack(fill='both', expand=True)
+
+        self.ads_tree.bind('<<TreeviewSelect>>', self.on_ad_select)
+        
+        # Cargar lista inicial
+        self.refresh_ads_list()
+
+    def refresh_ads_list(self):
+        """Lee la carpeta de publicidad (o la nube si USE_CLOUD es True) y actualiza el Treeview."""
+        for row in self.ads_tree.get_children():
+            self.ads_tree.delete(row)
+        
+        self.ad_preview_lbl.config(image='', text='[Vista Previa]')
+        self.ad_preview_lbl.image = None
+
+        if USE_CLOUD:
+            def fetch_cloud_ads():
+                try:
+                    response = requests.get(f"{CLOUD_URL}/api/publicidad", timeout=10)
+                    if response.status_code == 200:
+                        data = response.json()
+                        if data.get('status') == 'success':
+                            images = data.get('images', [])
+                            def populate():
+                                for f in images:
+                                    # Para la nube mostramos un indicador de tamaño y fecha
+                                    self.ads_tree.insert('', 'end', values=(f, "Nube", "Remoto"))
+                            self.after(0, populate)
+                        else:
+                            print(f"Error de la nube: {data.get('message')}")
+                    else:
+                        print(f"Error HTTP: {response.status_code}")
+                except Exception as e:
+                    print(f"Excepción obteniendo publicidad remota: {e}")
+            
+            threading.Thread(target=fetch_cloud_ads, daemon=True).start()
+        else:
+            ads_dir = os.path.abspath(os.path.join('Imagenes', 'publicidad'))
+            if not os.path.exists(ads_dir):
+                try:
+                    os.makedirs(ads_dir)
+                except Exception:
+                    return
+
+            for f in os.listdir(ads_dir):
+                if f.lower().endswith(('.png', '.jpg', '.jpeg', '.webp', '.avif', '.mp4', '.avi', '.mov')):
+                    f_path = os.path.join(ads_dir, f)
+                    size_kb = round(os.path.getsize(f_path) / 1024, 1)
+                    mtime = datetime.fromtimestamp(os.path.getmtime(f_path)).strftime('%Y-%m-%d %H:%M')
+                    self.ads_tree.insert('', 'end', values=(f, size_kb, mtime))
+
+    @require_permission(Permissions.PRODUCT_MANAGE)
+    def upload_ad_image(self):
+        """Abre un diálogo para seleccionar y copiar una imagen o video."""
+        from tkinter import filedialog
+        file_path = filedialog.askopenfilename(
+            title="Seleccionar Archivo (Imagen o Video)",
+            filetypes=(("Archivos Multimedia", "*.png;*.jpg;*.jpeg;*.webp;*.avif;*.mp4;*.avi;*.mov"), ("Todos", "*.*"))
+        )
+        if file_path:
+            filename = os.path.basename(file_path)
+            
+            # Copiar localmente primero para mantener el proyecto local actualizado
+            ads_dir = os.path.abspath(os.path.join('Imagenes', 'publicidad'))
+            if not os.path.exists(ads_dir): os.makedirs(ads_dir)
+            dest_path = os.path.join(ads_dir, filename)
+            try:
+                shutil.copy2(file_path, dest_path)
+            except Exception as e:
+                print(f"Aviso: No se pudo copiar localmente: {e}")
+
+            if USE_CLOUD:
+                # Subir a la nube en segundo plano para no congelar la app
+                def upload_thread():
+                    try:
+                        with open(file_path, 'rb') as f:
+                            files = {'file': (filename, f)}
+                            response = requests.post(f"{CLOUD_URL}/api/publicidad/upload", files=files, timeout=30)
+                        
+                        if response.status_code == 200:
+                            data = response.json()
+                            if data.get('status') == 'success':
+                                self.after(0, lambda: messagebox.showinfo("Éxito", f"Archivo '{filename}' subido correctamente a la nube y guardado localmente."))
+                            else:
+                                self.after(0, lambda: messagebox.showerror("Error", f"Error de la nube: {data.get('message')}"))
+                        else:
+                            self.after(0, lambda: messagebox.showerror("Error", f"Error del servidor HTTP: {response.status_code}"))
+                        self.after(0, self.refresh_ads_list)
+                    except Exception as e:
+                        self.after(0, lambda: messagebox.showerror("Error", f"Error al subir a la nube:\n{e}"))
+                
+                threading.Thread(target=upload_thread, daemon=True).start()
+            else:
+                messagebox.showinfo("Éxito", f"Archivo '{filename}' cargado localmente con éxito.")
+                self.refresh_ads_list()
+
+    @require_permission(Permissions.PRODUCT_MANAGE)
+    def delete_ad_image(self):
+        """Elimina el archivo de publicidad seleccionado."""
+        selected = self.ads_tree.selection()
+        if not selected:
+            messagebox.showwarning("Advertencia", "Seleccione un archivo para eliminar.")
+            return
+            
+        filename = self.ads_tree.item(selected[0])['values'][0]
+        
+        if messagebox.askyesno("Confirmar", f"¿Seguro que desea eliminar '{filename}'?"):
+            # Eliminar localmente primero
+            ads_dir = os.path.abspath(os.path.join('Imagenes', 'publicidad'))
+            file_path = os.path.join(ads_dir, filename)
+            if os.path.exists(file_path):
+                try: os.remove(file_path)
+                except Exception as e: print(f"Aviso: No se pudo borrar localmente: {e}")
+                
+            if USE_CLOUD:
+                # Eliminar de la nube en segundo plano
+                def delete_thread():
+                    try:
+                        import urllib.parse
+                        response = requests.delete(f"{CLOUD_URL}/api/publicidad/delete/{urllib.parse.quote(filename)}", timeout=10)
+                        if response.status_code == 200:
+                            data = response.json()
+                            if data.get('status') == 'success':
+                                self.after(0, lambda: messagebox.showinfo("Éxito", f"Archivo '{filename}' eliminado correctamente de la nube y localmente."))
+                            else:
+                                self.after(0, lambda: messagebox.showerror("Error", f"Error de la nube: {data.get('message')}"))
+                        else:
+                            self.after(0, lambda: messagebox.showerror("Error", f"Error del servidor HTTP: {response.status_code}"))
+                        self.after(0, self.refresh_ads_list)
+                    except Exception as e:
+                        self.after(0, lambda: messagebox.showerror("Error", f"Error al eliminar de la nube:\n{e}"))
+                
+                threading.Thread(target=delete_thread, daemon=True).start()
+            else:
+                messagebox.showinfo("Éxito", f"Archivo '{filename}' eliminado localmente.")
+                self.refresh_ads_list()
+
+    def on_ad_select(self, event):
+        """Muestra una vista previa del archivo seleccionado (descarga si es necesario)."""
+        selected = self.ads_tree.selection()
+        if selected:
+            filename = self.ads_tree.item(selected[0])['values'][0]
+            ads_dir = os.path.abspath(os.path.join('Imagenes', 'publicidad'))
+            file_path = os.path.join(ads_dir, filename)
+            
+            if filename.lower().endswith(('.mp4', '.avi', '.mov')):
+                self.ad_preview_lbl.config(image='', text='[Video: Sin Vista Previa]')
+                self.ad_preview_lbl.image = None
+            else:
+                if not os.path.exists(file_path) and USE_CLOUD:
+                    # Descargar vista previa de la nube en segundo plano
+                    def download_preview():
+                        try:
+                            import urllib.parse
+                            url = f"{CLOUD_URL}/api/publicidad/{urllib.parse.quote(filename)}"
+                            response = requests.get(url, timeout=5)
+                            if response.status_code == 200:
+                                if not os.path.exists(ads_dir): os.makedirs(ads_dir)
+                                with open(file_path, 'wb') as f:
+                                    f.write(response.content)
+                                
+                                def show():
+                                    img = load_image(file_path, size=(250, 250))
+                                    if img:
+                                        self.ad_preview_lbl.config(image=img, text='')
+                                        self.ad_preview_lbl.image = img
+                                self.after(0, show)
+                        except Exception as e:
+                            print(f"Error descargando vista previa: {e}")
+                    
+                    self.ad_preview_lbl.config(image='', text='[Cargando Vista Previa...]')
+                    threading.Thread(target=download_preview, daemon=True).start()
+                else:
+                    img = load_image(file_path, size=(250, 250))
+                    if img:
+                        self.ad_preview_lbl.config(image=img, text='')
+                        self.ad_preview_lbl.image = img
+                    else:
+                        self.ad_preview_lbl.config(image='', text='[Error de Imagen]')
 
     def setup_admin_menu(self):
         """Crea el dashboard interno de administración con cuadritos e imágenes."""
-        # Agregar herramientas avanzadas abajo primero, para que no queden ocultas
-        self.setup_admin_tools(self.menu_frame)
 
         cards_wrap = ttk.Frame(self.menu_frame)
         cards_wrap.pack(fill='both', expand=True)
 
         def make_admin_card(parent, img_name, title, desc, cmd, color="success"):
             # Reutilizamos el estilo de 'pop-out' del dashboard principal
-            card = ttk.Frame(parent, bootstyle="secondary", padding=2, cursor="hand2", takefocus=True, width=210, height=230)
+            card = ttk.Frame(parent, bootstyle="secondary", padding=2, cursor="hand2", takefocus=True, width=200, height=170)
             card.pack_propagate(False)
             
             inner = ttk.Frame(card, padding=8) 
@@ -2319,7 +3433,7 @@ class AdminFrame(tk.Canvas):
             img = None
             if img_name:
                 path = os.path.join('Imagenes', img_name)
-                img = load_image(path, size=(65, 65))
+                img = load_image(path, size=(50, 50))
             
             if img:
                 lbl = ttk.Label(inner, image=img)
@@ -2330,10 +3444,11 @@ class AdminFrame(tk.Canvas):
                 emoji = '📦'
                 if 'Usuarios' in title: emoji = '👥'
                 if 'Seguridad' in title: emoji = '🛡️'
+                if 'Publicidad' in title: emoji = '📺'
                 ttk.Label(inner, text=emoji, font=(None, 40)).pack(pady=(5, 5))
 
-            ttk.Label(inner, text=title, font=(None, 16, 'bold'), wraplength=190, justify='center').pack(pady=(0, 2))
-            ttk.Label(inner, text=desc, wraplength=180, justify='center', font=(None, 10)).pack(pady=2, fill='both', expand=True)
+            ttk.Label(inner, text=title, font=(None, 14, 'bold'), wraplength=180, justify='center').pack(pady=(0, 2))
+            ttk.Label(inner, text=desc, wraplength=170, justify='center', font=(None, 9)).pack(pady=2, fill='both', expand=True)
 
             def on_enter(e):
                 card.configure(bootstyle=color, padding=5)
@@ -2364,7 +3479,9 @@ class AdminFrame(tk.Canvas):
             ('user.png', 'Usuarios', 'Gestión de personal y accesos.', lambda: self.open_section(2, "GESTIÓN DE USUARIOS"), ['Administrador']),
             ('seguridad.png', 'Seguridad', 'Auditoría y respaldos de DB.', lambda: self.open_section(3, "SEGURIDAD Y AUDITORÍA"), ['Administrador']),
             ('pos.png', 'Menú / Productos', 'Gestión de productos y precios.', lambda: self.open_section(4, "GESTIÓN DE MENÚ"), ['Administrador', 'Supervisor']),
-            ('efectivo.jpeg', 'Cierres de Caja', 'Historial de reportes de cierre.', lambda: self.open_section(5, "HISTORIAL DE CIERRES"), ['Administrador', 'Supervisor'])
+            ('efectivo.jpeg', 'Cierres de Caja', 'Historial de reportes de cierre.', lambda: self.open_section(5, "HISTORIAL DE CIERRES"), ['Administrador', 'Supervisor']),
+            ('pos.png', 'Historial Ventas', 'Búsqueda y reimpresión de facturas.', lambda: self.open_section(6, "HISTORIAL DE FACTURAS"), ['Administrador', 'Supervisor']),
+            ('', 'Publicidad TV', 'Cargar videos e imágenes para la TV.', lambda: self.open_section(7, "GESTIÓN DE PUBLICIDAD"), ['Administrador', 'Supervisor']),
         ]
 
         user_role = self.user.get('rol', '') if self.user else ''
@@ -2373,8 +3490,8 @@ class AdminFrame(tk.Canvas):
         admin_cards = []
         for i, data in enumerate(filtered_cards):
             card = make_admin_card(cards_wrap, data[0], data[1], data[2], data[3])
-            row = i // 5
-            col = i % 5
+            row = i // 4
+            col = i % 4
             card.grid(row=row, column=col, padx=10, pady=10)
             admin_cards.append(card)
 
@@ -2388,7 +3505,7 @@ class AdminFrame(tk.Canvas):
             card.bind("<Left>", lambda e, idx=i: nav_admin(idx, e))
             card.bind("<Right>", lambda e, idx=i: nav_admin(idx, e))
 
-        num_cols = min(len(filtered_cards), 5)
+        num_cols = min(len(filtered_cards), 4)
         if num_cols == 0: num_cols = 1
         for i in range(num_cols): cards_wrap.columnconfigure(i, weight=1)
 
@@ -2409,16 +3526,55 @@ class AdminFrame(tk.Canvas):
         self.btn_back_admin.pack_forget()
         self.btn_back_main.pack(side='right', padx=5)
 
+    def _check_section_permission(self, idx):
+        """Verifica si el usuario tiene permiso para ver la sección."""
+        # El índice 0 es el Menú principal de Admin (las tarjetas), que siempre debe ser accesible
+        # si el usuario ya logró entrar al AdminFrame
+        if idx == 0:
+            return True
+            
+        user_role = self.user.get('rol', '')
+        
+        permissions = {
+            'Administrador': [1, 2, 3, 4, 5, 6, 7],
+            'Supervisor': [1, 4, 5, 6, 7],
+            'Cajera': [],
+            'Cocina': [],
+            'Mesero': [],
+            'Publicidad': []
+        }
+        
+        if idx not in permissions.get(user_role, []):
+            messagebox.showerror("Acceso Denegado", "No tiene permiso para acceder a esta sección")
+            self.show_admin_menu()
+            return False
+        return True
+
     def refresh(self):
-        """Refresca la sección activa."""
+        """Refresca la sección activa con verificación de permisos."""
         try:
             idx = self.notebook.index('current')
-            if idx == 1: self.refresh_inventory()
-            elif idx == 2: self.refresh_users()
-            elif idx == 3: self.refresh_security()
-            elif idx == 4: self.refresh_menu()
-            elif idx == 5: self.refresh_cierres()
-        except: pass
+            
+            # Verificar permisos antes de refrescar
+            if not self._check_section_permission(idx):
+                return
+            
+            if idx == 1: 
+                self.refresh_inventory()
+            elif idx == 2: 
+                self.refresh_users()
+            elif idx == 3: 
+                self.refresh_security()
+            elif idx == 4: 
+                self.refresh_menu()
+            elif idx == 5: 
+                self.refresh_cierres()
+            elif idx == 6:
+                self.refresh_ventas_history()
+            elif idx == 7:
+                self.refresh_ads_list()
+        except Exception as e:
+            logging.error(f"Error en refresh: {e}")
 
     def setup_inventory(self):
         """Prepara la estructura visual de la sección de inventario con una tabla moderna."""
@@ -2442,7 +3598,7 @@ class AdminFrame(tk.Canvas):
         self.inv_tree.pack(fill='both', expand=True)
 
         # Panel de acciones rápidas (Ajuste de stock)
-        actions = ttk.LabelFrame(self.inv_frame, text="Acciones de Ajuste Rápido")
+        actions = tk.LabelFrame(self.inv_frame, text="Acciones de Ajuste Rápido", bg=BG, fg="white", font=(None, 11, "bold"))
         actions.pack(fill='x', pady=(20, 0), padx=10)
         
         ttk.Label(actions, text="Seleccione un ingrediente de la tabla y use los botones para ajustar:", font=(None, 11)).pack(side='left', padx=10)
@@ -2478,7 +3634,7 @@ class AdminFrame(tk.Canvas):
         self.user_tree.pack(fill='both', expand=True, pady=10)
         
         # Formulario para agregar nuevos usuarios
-        form = ttk.LabelFrame(self.users_frame, text='Registrar Nuevo Usuario')
+        form = tk.LabelFrame(self.users_frame, text='Registrar Nuevo Usuario', bg=BG, fg="white", font=(None, 11, "bold"))
         form.pack(fill='x', pady=10, padx=10)
         
         inputs = ttk.Frame(form)
@@ -2493,7 +3649,7 @@ class AdminFrame(tk.Canvas):
         self.e_pass.grid(row=0, column=3, padx=5, pady=5, sticky='ew')
         
         ttk.Label(inputs, text='Rol:').grid(row=1, column=0, padx=5, pady=5)
-        self.e_rol = ttk.Combobox(inputs, values=['Admin', 'Cajera', 'Cocina', 'Mesero'])
+        self.e_rol = ttk.Combobox(inputs, values=['Administrador', 'Supervisor', 'Cajera', 'Cocina', 'Mesero', 'Publicidad'])
         self.e_rol.grid(row=1, column=1, padx=5, pady=5, sticky='ew')
         
         ttk.Label(inputs, text='Nombre:').grid(row=1, column=2, padx=5, pady=5)
@@ -2507,7 +3663,7 @@ class AdminFrame(tk.Canvas):
     def setup_security(self):
         """Configura el panel de seguridad y métricas con un diseño limpio."""
         # --- Métricas de Seguridad ---
-        metrics_frame = ttk.LabelFrame(self.security_frame, text="Estado de Seguridad del Sistema")
+        metrics_frame = tk.LabelFrame(self.security_frame, text="Estado de Seguridad del Sistema", bg=BG, fg="white", font=(None, 11, "bold"))
         metrics_frame.pack(fill='x', pady=(0, 20), padx=10)
         
         # Grid para métricas
@@ -2601,7 +3757,7 @@ class AdminFrame(tk.Canvas):
         draw = ImageDraw.Draw(img)
         try:
             font = ImageFont.truetype("arialbd.ttf", 14)
-        except:
+        except Exception:
             font = ImageFont.load_default()
             
         y = 20
@@ -2635,8 +3791,16 @@ class AdminFrame(tk.Canvas):
 
         ttk.Label(self.cierre_history_frame, text="📊 HISTORIAL DE CIERRES DE CAJA", font=(None, 18, 'bold')).pack(pady=10)
 
+        # Botones de Acción con estilo profesional (Empacados al fondo PRIMERO para que nunca se oculten)
+        btn_f = ttk.Frame(self.cierre_history_frame)
+        btn_f.pack(side='bottom', fill='x', pady=20, padx=10)
+        
+        # Frame interior para centrar los botones
+        btn_inner = ttk.Frame(btn_f)
+        btn_inner.pack(anchor='center')
+
         main_c = ttk.Frame(self.cierre_history_frame)
-        main_c.pack(fill='both', expand=True)
+        main_c.pack(side='top', fill='both', expand=True)
 
         # Lista de cierres (Lado Izquierdo)
         left = ttk.Frame(main_c, width=300)
@@ -2675,16 +3839,10 @@ class AdminFrame(tk.Canvas):
 
         self.cierre_list.bind('<<TreeviewSelect>>', on_cierre_select)
 
-        # Botones de Acción
-        btn_f = ttk.Frame(self.cierre_history_frame)
-        btn_f.pack(fill='x', pady=10)
-
-        ttk.Button(btn_f, text="🔄 ACTUALIZAR LISTA", command=self.refresh_cierres, bootstyle="info").pack(side='left', padx=10)
-
         def print_historical():
             txt = self.cierre_view.get('1.0', 'end-1c')
             if not txt.strip():
-                messagebox.showwarning("Aviso", "Seleccione un cierre primero.")
+                messagebox.showwarning("Aviso", "Seleccione un cierre de la lista primero.")
                 return
             
             import os
@@ -2695,10 +3853,24 @@ class AdminFrame(tk.Canvas):
             filename = os.path.join(temp_dir, base_name)
             with open(filename, "w", encoding="utf-8") as f:
                 f.write(txt)
-            os.startfile(filename)
-            messagebox.showinfo("Impresión", "Reporte enviado a imprimir.")
+            
+            try:
+                import sys
+                if sys.platform == "win32":
+                    cfg = PrinterConfig()
+                    printer_name = cfg.resolve_printer("cierre")
+                    if printer_name and WIN32_PRINT_AVAILABLE:
+                        win32api.ShellExecute(0, "printto", filename, f'"{printer_name}"', ".", 0)
+                    else:
+                        os.startfile(filename, "print")
+                else:
+                    messagebox.showinfo("Info", "Impresión nativa solo disponible en Windows.")
+                messagebox.showinfo("Impresión", "Reporte de cierre enviado a la impresora exitosamente.")
+            except Exception as e:
+                messagebox.showerror("Error", f"No se pudo imprimir el reporte: {e}")
 
-        ttk.Button(btn_f, text="🖨 IMPRIMIR SELECCIONADO", command=print_historical, bootstyle="success").pack(side='left', padx=10)
+        ttk.Button(btn_inner, text="🔄 ACTUALIZAR LISTA", command=self.refresh_cierres, bootstyle="info-outline", padding=(20, 10), cursor="hand2").pack(side='left', padx=15)
+        ttk.Button(btn_inner, text="🖨 REIMPRIMIR CIERRE SELECCIONADO", command=print_historical, bootstyle="primary", padding=(20, 10), cursor="hand2").pack(side='left', padx=15)
 
         self.refresh_cierres()
 
@@ -2708,36 +3880,225 @@ class AdminFrame(tk.Canvas):
             self.cierre_list.delete(*self.cierre_list.get_children())
             rows = self.db.fetch_all("SELECT id, cierre_at, cierre_total FROM caja_sesiones WHERE estado='CERRADO' ORDER BY id DESC")
             for r in rows:
-                fecha = datetime.fromisoformat(r[1]).strftime('%d/%m/%Y %H:%M') if r[1] else "N/A"
+                try:
+                    raw_date = r[1]
+                    if raw_date and isinstance(raw_date, str):
+                        # Intentar convertir si es un string ISO
+                        fecha = datetime.fromisoformat(raw_date).strftime('%d/%m/%Y %H:%M')
+                    else:
+                        fecha = str(raw_date) if raw_date else "N/A"
+                except Exception:
+                    fecha = str(r[1]) if r[1] else "Error Fecha"
+                    
                 self.cierre_list.insert('', 'end', values=(r[0], fecha, f"${r[2]:.2f}"))
 
+    def setup_ventas_history(self):
+        """Prepara la interfaz para buscar y reimprimir facturas individuales."""
+        ttk.Label(self.ventas_history_frame, text="📄 HISTORIAL DE FACTURACIÓN Y VENTAS", font=(None, 18, 'bold')).pack(pady=10)
+        
+        # Filtros
+        filters = ttk.Frame(self.ventas_history_frame, padding=10)
+        filters.pack(fill='x')
+        
+        ttk.Label(filters, text="Fecha (YYYY-MM-DD):").pack(side='left', padx=5)
+        self.ent_ventas_fecha = ttk.Entry(filters, width=15)
+        self.ent_ventas_fecha.insert(0, datetime.now().strftime('%Y-%m-%d'))
+        self.ent_ventas_fecha.pack(side='left', padx=5)
+        
+        ttk.Label(filters, text="Factura/Mesa:").pack(side='left', padx=5)
+        self.ent_ventas_search = ttk.Entry(filters, width=20)
+        self.ent_ventas_search.pack(side='left', padx=5)
+        
+        ttk.Button(filters, text="🔍 BUSCAR", command=self.refresh_ventas_history, bootstyle="info").pack(side='left', padx=10)
+        
+        # Tabla de facturas
+        main_v = ttk.Frame(self.ventas_history_frame)
+        main_v.pack(fill='both', expand=True, pady=10)
+        
+        cols = ('ID', 'Número', 'Fecha', 'Mesa', 'Total', 'Método')
+        self.ventas_tree = ttk.Treeview(main_v, columns=cols, show='headings', height=12)
+        for c in cols:
+            self.ventas_tree.heading(c, text=c)
+            self.ventas_tree.column(c, anchor='center', width=100)
+        self.ventas_tree.column('Fecha', width=150)
+        self.ventas_tree.pack(side='left', fill='both', expand=True)
+        
+        vsb = ttk.Scrollbar(main_v, orient="vertical", command=self.ventas_tree.yview)
+        self.ventas_tree.configure(yscrollcommand=vsb.set)
+        vsb.pack(side='right', fill='y')
+        
+        # Botones inferiores
+        btns = ttk.Frame(self.ventas_history_frame, padding=10)
+        btns.pack(fill='x')
+        ttk.Button(btns, text="🖨 REIMPRIMIR FACTURA SELECCIONADA", command=self.reprint_selected_invoice, 
+                   bootstyle="success", padding=12).pack(anchor='center')
+
+    def refresh_ventas_history(self):
+        """Consulta la BD con los filtros aplicados."""
+        for r in self.ventas_tree.get_children(): self.ventas_tree.delete(r)
+        
+        fecha = self.ent_ventas_fecha.get().strip()
+        search = self.ent_ventas_search.get().strip()
+        
+        query = "SELECT id, numero, created_at, mesa, total, metodo_pago, items FROM pedidos WHERE pagado = 1"
+        params = []
+        
+        if fecha:
+            query += " AND created_at LIKE ?"
+            params.append(f"{fecha}%")
+        if search:
+            query += " AND (numero LIKE ? OR mesa LIKE ?)"
+            params.extend([f"%{search}%", f"%{search}%"])
+            
+        query += " ORDER BY created_at DESC LIMIT 200"
+        
+        rows = self.db.fetch_all(query, params)
+        for r in rows:
+            try:
+                # r[2] es la fecha
+                fec = str(r[2]).replace('T', ' ')[:16] if r[2] else 'N/A'
+                # r[4] es el total
+                try:
+                    total_val = float(r[4]) if r[4] is not None else 0.0
+                except (ValueError, TypeError):
+                    total_val = 0.0
+                
+                # r[6] son los items (tags)
+                items_tag = str(r[6]) if r[6] else ""
+                
+                self.ventas_tree.insert('', 'end', 
+                                       values=(r[0], r[1], fec, r[3], f"${total_val:.2f}", r[5]), 
+                                       tags=(items_tag,))
+            except Exception as e:
+                logging.error(f"Error procesando fila de venta: {e}")
+                continue
+
+    def reprint_selected_invoice(self):
+        """Obtiene los datos de la factura seleccionada y la envía a la impresora."""
+        sel = self.ventas_tree.selection()
+        if not sel:
+            messagebox.showwarning("Aviso", "Seleccione una factura de la lista.")
+            return
+            
+        item = self.ventas_tree.item(sel[0])
+        vals = item['values']
+        # Recuperar items del tag (guardados como JSON)
+        try:
+            items_raw = item['tags'][0]
+            pedido_data = {
+                'numero': vals[1],
+                'created_at': vals[2],
+                'mesa': vals[3],
+                'total': float(vals[4].replace('$', '')),
+                'metodo_pago': vals[5],
+                'items': json.loads(items_raw)
+            }
+            
+            self._print_windows_invoice(pedido_data)
+            messagebox.showinfo("Éxito", f"Factura {pedido_data['numero']} enviada a la impresora.")
+        except Exception as e:
+            logging.error(f"Error al reimprimir factura: {e}")
+            messagebox.showerror("Error", f"No se pudo procesar la reimpresión: {e}")
+
+    def _get_escpos_image(self, image_path, width=384):
+        """Convierte una imagen a comandos ESC/POS (GS v 0)."""
+        try:
+            from PIL import Image
+            img = Image.open(image_path).convert('L')
+            w_percent = (width / float(img.size[0]))
+            h_size = int((float(img.size[1]) * float(w_percent)))
+            img = img.resize((width, h_size), Image.LANCZOS)
+            img = img.point(lambda x: 0 if x < 128 else 255, '1')
+            pixels = list(img.getdata())
+            w, h = img.size
+            bytes_per_row = (w + 7) // 8
+            raster_data = bytearray()
+            for y in range(h):
+                for x in range(bytes_per_row):
+                    byte = 0
+                    for bit in range(8):
+                        pixel_x = x * 8 + bit
+                        if pixel_x < w:
+                            if pixels[y * w + pixel_x] == 0: byte |= (1 << (7 - bit))
+                    raster_data.append(byte)
+            header = bytes([29, 118, 48, 0, bytes_per_row % 256, bytes_per_row // 256, h % 256, h // 256])
+            return header + raster_data
+        except Exception: return b""
+
+    def _print_windows_invoice(self, data):
+        """Impresión usando el diálogo estándar de Windows."""
+        import datetime
+        fecha = datetime.datetime.now().strftime('%d/%m/%Y %I:%M %p')
+        num_fac = str(data.get('numero', '000000')).zfill(8)
+        total = float(data.get('total', 0))
+        
+        # Construir el ticket para el archivo de texto
+        ticket = f"\n"
+        ticket += "      PIK'TA GRILL SOLUTIONS    \n"
+        ticket += "      RUC: 8-765-4321 DV 01     \n"
+        ticket += "--------------------------------\n"
+        ticket += "  COMPROBANTE AUXILIAR DE       \n"
+        ticket += "     FACTURA ELECTRÓNICA        \n"
+        ticket += "--------------------------------\n"
+        ticket += f" FACTURA: {num_fac}\n"
+        ticket += f" FECHA:   {fecha}\n"
+        ticket += "--------------------------------\n"
+        ticket += f" CLIENTE: {data.get('cliente', 'CLIENTE GENERAL')}\n"
+        ticket += "--------------------------------\n"
+        
+        for it in data.get('items', []):
+            cant = it.get('cantidad', it.get('qty', 1))
+            nom = str(it.get('nombre', '')).upper()
+            pre = float(it.get('precio_unitario', it.get('precio', 0)))
+            sub = pre * cant
+            ticket += f"{nom[:32]}\n"
+            ticket += f" {cant:.2f} X {pre:>8.2f}    {sub:>8.2f}\n"
+            
+        ticket += "--------------------------------\n"
+        ticket += f" TOTAL                   B/.{total:>8.2f}\n"
+        ticket += "--------------------------------\n"
+        ticket += "¡GRACIAS POR SU PREFERENCIA!\n\n"
+        
+        try:
+            import tempfile
+            import os
+            fd, path = tempfile.mkstemp(suffix=".txt")
+            with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                f.write(ticket)
+
+            cfg = PrinterConfig()
+            printer_name = cfg.resolve_printer("factura")
+            if printer_name:
+                win32api.ShellExecute(0, "printto", path, f'"{printer_name}"', ".", 0)
+            else:
+                win32api.ShellExecute(0, "print", path, None, ".", 0)
+            
+            # Esperar un poco antes de borrar (opcional)
+            # time.sleep(2)
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo abrir el diálogo de impresión: {e}")
+
     def setup_admin_tools(self, parent):
-        """Herramientas especiales para el administrador con un diseño destacado."""
-        tools_frame = ttk.Frame(parent, padding=(0, 40, 0, 0))
-        tools_frame.pack(fill='x', side='bottom')
-
-        # Línea divisoria
-        ttk.Separator(tools_frame, orient='horizontal').pack(fill='x', pady=20)
-
-        ttk.Label(tools_frame, text="🛠️ Herramientas de Mantenimiento Avanzado", font=(None, 14, 'bold'), bootstyle="secondary").pack(anchor='w', padx=10, pady=(0, 15))
+        """Herramientas especiales para el administrador reubicadas en la cabecera."""
+        tools_frame = ttk.Frame(parent, bootstyle="success")
+        tools_frame.pack(side='left', fill='y', padx=20)
         
-        btn_container = ttk.Frame(tools_frame)
-        btn_container.pack(fill='x')
+        # Botones con iconos compactos para cabecera
+        btn_clear = ttk.Button(tools_frame, text="🧹 Reiniciar Cocina", 
+                  command=self.clear_all_orders, bootstyle="danger", padding=8)
+        btn_clear.pack(side='left', padx=5, pady=5)
         
-        # Botones con iconos y estilos claros
-        btn_clear = ttk.Button(btn_container, text="🧹 LIMPIAR PEDIDOS (REINICIAR COCINA)", 
-                  command=self.clear_all_orders, bootstyle="danger", padding=12)
-        btn_clear.pack(side='left', padx=10)
+        btn_reset = ttk.Button(tools_frame, text="📦 Reiniciar Inventario", 
+                  command=self.reset_inventory, bootstyle="warning", padding=8)
+        btn_reset.pack(side='left', padx=5, pady=5)
         
-        btn_reset = ttk.Button(btn_container, text="📦 REINICIAR INVENTARIO A CERO", 
-                  command=self.reset_inventory, bootstyle="warning", padding=12)
-        btn_reset.pack(side='left', padx=10)
+        btn_backup = ttk.Button(tools_frame, text="💾 Backup DB", 
+                  command=self.manual_backup, bootstyle="light", padding=8)
+        btn_backup.pack(side='left', padx=5, pady=5)
         
-        btn_backup = ttk.Button(btn_container, text="💾 CREAR RESPALDO DE SEGURIDAD (BACKUP)", 
-                  command=self.manual_backup, bootstyle="success", padding=12)
-        btn_backup.pack(side='left', padx=10)
-
-        ttk.Label(tools_frame, text="Nota: Estas acciones son irreversibles. Use con precaución.", font=(None, 9, 'italic'), bootstyle="muted").pack(anchor='w', padx=15, pady=10)
+        btn_printers = ttk.Button(tools_frame, text="🖨 Config. Impresoras", 
+                  command=self.open_printer_config, bootstyle="info", padding=8)
+        btn_printers.pack(side='left', padx=5, pady=5)
 
     @require_permission(Permissions.SYSTEM_CONFIG)
     def clear_all_orders(self):
@@ -2762,23 +4123,37 @@ class AdminFrame(tk.Canvas):
                 messagebox.showerror("Error", f"No se pudo reiniciar el inventario: {e}")
 
     def refresh_security(self):
-        """Actualiza las métricas y logs de seguridad."""
         try:
-            # Intentos fallidos hoy
+            # Usar DATE() en lugar de LIKE para mayor seguridad
             today = datetime.now().strftime('%Y-%m-%d')
-            failed = self.db.fetch_one("SELECT COUNT(*) FROM access_logs WHERE action='failed_login' AND created_at LIKE ?", (f"{today}%",))
+            failed = self.db.fetch_one(
+                "SELECT COUNT(*) FROM access_logs WHERE action='failed_login' AND DATE(created_at) = DATE(?)",
+                (today,)
+            )
             self.lbl_failed.config(text=f"Intentos fallidos hoy: {failed[0] if failed else 0}")
             
-            # Sesiones activas (del SessionManager global)
+            # Sesiones activas
             active = len(session_manager.sessions)
             self.lbl_sessions.config(text=f"Sesiones activas: {active}")
             
-            # Logs de auditoría
-            for r in self.audit_tree.get_children(): self.audit_tree.delete(r)
-            logs = self.db.fetch_all("SELECT fecha, usuario, accion, tabla, detalles FROM auditoria ORDER BY fecha DESC LIMIT 50")
-            for log in logs: self.audit_tree.insert('', 'end', values=log)
+            # Logs de auditoría con paginación
+            for r in self.audit_tree.get_children():
+                self.audit_tree.delete(r)
+            
+            # Limitar a 100 registros y usar ORDER BY seguro
+            logs = self.db.fetch_all("""
+                SELECT fecha, usuario, accion, tabla, detalles 
+                FROM auditoria 
+                ORDER BY fecha DESC 
+                LIMIT 100
+            """)
+            
+            for log in logs:
+                self.audit_tree.insert('', 'end', values=log)
+                
         except Exception as e:
             logging.error(f"Error al refrescar seguridad: {e}")
+            self.lbl_failed.config(text="Error al cargar métricas")
 
     def refresh_inventory(self):
         """Consulta y actualiza la tabla de inventario con formato limpio."""
@@ -2808,13 +4183,6 @@ class AdminFrame(tk.Canvas):
         for r in self.user_tree.get_children(): self.user_tree.delete(r)
         rows = self.db.fetch_all('SELECT id, username, rol, nombre_completo FROM usuarios')
         for row in rows: self.user_tree.insert('', 'end', values=row)
-
-    class PasswordPolicy:
-        @staticmethod
-        def validate(password):
-            if len(password) < 6: return False, "La contraseña debe tener al menos 6 caracteres"
-            if not any(c.isdigit() for c in password): return False, "Debe contener al menos un número"
-            return True, "OK"
 
     @require_permission(Permissions.USER_MANAGE)
     def create_user(self):
@@ -2876,8 +4244,12 @@ class AdminFrame(tk.Canvas):
         self.menu_tree.pack(fill='both', expand=True, pady=10)
 
         # Formulario para nuevo producto
-        form = ttk.LabelFrame(self.products_frame, text='Añadir Nuevo Producto')
-        form.pack(fill='x', pady=10, padx=10)
+        form = tk.LabelFrame(self.products_frame, text='Añadir Nuevo Producto', bg=BG, fg="white", font=(None, 11, "bold"))
+        form.pack(fill='x', side='bottom', pady=10, padx=10)
+        
+        # Botón de refrescar en la cabecera
+        btn_refresh = ttk.Button(self.products_frame, text="🔄 REFRESCAR", command=self.refresh_menu, bootstyle="outline-info")
+        btn_refresh.place(relx=0.85, rely=0.01)
         
         inputs = ttk.Frame(form)
         inputs.pack(fill='x', padx=10, pady=10)
@@ -2891,7 +4263,9 @@ class AdminFrame(tk.Canvas):
         self.e_prod_price.grid(row=0, column=3, padx=5, pady=5, sticky='ew')
         
         ttk.Label(inputs, text='Categoría:').grid(row=1, column=0, padx=5, pady=5)
-        self.e_prod_cat = ttk.Combobox(inputs, values=['🍔 Combos', '🍟 Extras', '🥤 Bebidas'])
+        # Cargar categorías dinámicamente de la BD
+        current_cats = [row[0] for row in self.db.fetch_all('SELECT DISTINCT categoria FROM productos_menu WHERE categoria IS NOT NULL')]
+        self.e_prod_cat = ttk.Combobox(inputs, values=current_cats if current_cats else ['🍔 Combos', '🍟 Extras', '🥤 Bebidas'])
         self.e_prod_cat.grid(row=1, column=1, padx=5, pady=5, sticky='ew')
         
         ttk.Label(inputs, text='Emoji:').grid(row=1, column=2, padx=5, pady=5)
@@ -2902,6 +4276,16 @@ class AdminFrame(tk.Canvas):
         self.e_prod_prep = ttk.Entry(inputs)
         self.e_prod_prep.grid(row=2, column=1, padx=5, pady=5, sticky='ew')
         
+        ttk.Label(inputs, text='Imagen:').grid(row=2, column=2, padx=5, pady=5)
+        self.img_frame = ttk.Frame(inputs)
+        self.img_frame.grid(row=2, column=3, padx=5, pady=5, sticky='ew')
+        
+        self.lbl_selected_img = ttk.Label(self.img_frame, text="Ninguna", foreground="gray")
+        self.lbl_selected_img.pack(side='left', padx=(0, 5))
+        
+        ttk.Button(self.img_frame, text="Examinar...", command=self.select_product_image, bootstyle="secondary-outline").pack(side='left')
+        self.selected_image_path = None
+        
         inputs.columnconfigure((1, 3), weight=1)
         
         btn_frame = ttk.Frame(form)
@@ -2909,6 +4293,51 @@ class AdminFrame(tk.Canvas):
         
         ttk.Button(btn_frame, text='CREAR PRODUCTO', command=self.create_product, bootstyle="info").pack(side='left', padx=5)
         ttk.Button(btn_frame, text='ELIMINAR SELECCIONADO', command=self.delete_product, bootstyle="danger-outline").pack(side='left', padx=5)
+
+    def select_product_image(self):
+        from tkinter import filedialog
+        import mimetypes
+        
+        path = filedialog.askopenfilename(
+            title="Seleccionar Imagen de Producto",
+            filetypes=[
+                ("Imágenes", "*.png *.jpg *.jpeg *.webp *.avif"),
+                ("PNG", "*.png"),
+                ("JPEG", "*.jpg *.jpeg"),
+                ("WebP", "*.webp")
+            ]
+        )
+        
+        if not path:
+            return
+        
+        # Verificar tamaño (máx 5MB)
+        try:
+            import os
+            file_size = os.path.getsize(path)
+            max_size = 5 * 1024 * 1024  # 5MB
+            
+            if file_size > max_size:
+                messagebox.showerror(
+                    "Error", 
+                    f"La imagen es demasiado grande.\n"
+                    f"Tamaño máximo: 5MB\n"
+                    f"Tamaño del archivo: {file_size / (1024*1024):.2f}MB"
+                )
+                return
+            
+            # Verificar que sea una imagen válida
+            import imghdr
+            img_type = imghdr.what(path)
+            if img_type not in ['png', 'jpeg', 'webp']:
+                messagebox.showerror("Error", "Formato de imagen no soportado. Use PNG, JPEG o WebP.")
+                return
+            
+            self.selected_image_path = path
+            self.lbl_selected_img.config(text=os.path.basename(path), foreground="blue")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo validar la imagen: {e}")
 
     def refresh_menu(self):
         """Actualiza la tabla de productos del menú."""
@@ -2918,6 +4347,11 @@ class AdminFrame(tk.Canvas):
             disp = "SÍ" if r[5] else "NO"
             prep = r[6] if r[6] is not None else ''
             self.menu_tree.insert('', 'end', values=(r[0], r[1], r[2], f"${r[3]:.2f}", r[4], disp, prep))
+        
+        # Aprovechar para refrescar categorías en el combo
+        current_cats = [row[0] for row in self.db.fetch_all('SELECT DISTINCT categoria FROM productos_menu WHERE categoria IS NOT NULL')]
+        if hasattr(self, 'e_prod_cat'):
+            self.e_prod_cat['values'] = current_cats
 
     @require_permission(Permissions.PRODUCT_MANAGE)
     def create_product(self):
@@ -2926,19 +4360,42 @@ class AdminFrame(tk.Canvas):
         prep_val = self.e_prod_prep.get().strip() if hasattr(self, 'e_prod_prep') else ''
         try:
             prep_int = int(prep_val) if prep_val else None
-        except:
+        except Exception:
             prep_int = None
         if not n or not p:
             messagebox.showwarning('Error', 'Nombre y precio son obligatorios')
             return
         try:
             self.db.execute('INSERT INTO productos_menu (nombre, precio, categoria, emoji, prep_duration) VALUES (?,?,?,?,?)', (n, float(p), c, e or '🍽', prep_int))
+            
+            # Copiar imagen si fue seleccionada
+            if hasattr(self, 'selected_image_path') and self.selected_image_path:
+                import shutil, os, re
+                img_dir = 'Imagenes'
+                if not os.path.exists(img_dir):
+                    os.makedirs(img_dir)
+                    
+                ext = os.path.splitext(self.selected_image_path)[1]
+                def normalize(t): return re.sub(r'[^a-zA-Z0-9]', '', str(t)).lower()
+                norm_n = normalize(n)
+                dest_path = os.path.join(img_dir, f"{norm_n}{ext}")
+                
+                try:
+                    shutil.copy2(self.selected_image_path, dest_path)
+                except Exception as img_err:
+                    logging.error(f"Error al copiar imagen: {img_err}")
+                    messagebox.showwarning("Advertencia", f"Producto creado pero no se pudo copiar la imagen: {img_err}")
+                    
+                self.selected_image_path = None
+                if hasattr(self, 'lbl_selected_img'):
+                    self.lbl_selected_img.config(text="Ninguna", foreground="gray")
+                    
             messagebox.showinfo('Éxito', 'Producto añadido al menú')
             for entry in (self.e_prod_name, self.e_prod_price, self.e_prod_emoji, getattr(self, 'e_prod_prep', None)):
                 if entry:
                     try:
                         entry.delete(0, 'end')
-                    except:
+                    except Exception:
                         pass
             self.refresh_menu()
         except Exception as err:
@@ -2959,6 +4416,16 @@ class AdminFrame(tk.Canvas):
             except Exception as e:
                 messagebox.showerror('Error', f"No se pudo eliminar: {e}")
 
+    @require_permission(Permissions.SYSTEM_CONFIG)
+    def open_printer_config(self):
+        """Abre el diálogo de configuración de impresoras por tipo de documento."""
+        try:
+            dialog = PrinterConfigDialog(self)
+            dialog.show()
+        except Exception as e:
+            logging.error(f"Error al abrir configuración de impresoras: {e}")
+            messagebox.showerror("Error", f"No se pudo abrir la configuración: {e}")
+
 
 class LoginWindow(ttk.Toplevel):
     """
@@ -2967,6 +4434,8 @@ class LoginWindow(ttk.Toplevel):
     """
     def __init__(self, master, db):
         super().__init__(master)
+        self.withdraw() # Ocultar inmediatamente mientras se construye y redimensiona
+        
         self.db = db
         self.user = None # Guardará los datos del usuario si el login es exitoso
         
@@ -2980,40 +4449,48 @@ class LoginWindow(ttk.Toplevel):
         # Aumentar tamaño de la ventana de login para que se aprecie mejor
         center_window(self, 500, 700)
         self.grab_set() # Bloquea interacción con la ventana principal hasta que se cierre esta
-        container = ttk.Frame(self, padding=30)
-        container.pack(fill='both', expand=True)
-
-        # Logo de la empresa en el login - Aumentado para mejor visualización
-        logo_path = os.path.join('Imagenes', 'pikta2.png')
-        self.logo_img = load_image(logo_path, size=(200, 200))
-        if self.logo_img:
-            logo_lbl = ttk.Label(container, image=self.logo_img)
-            logo_lbl.pack(pady=(0, 20))
         
-        ttk.Label(container, text='Bienvenido', font=(None, 28, 'bold')).pack(pady=10)
-        ttk.Label(container, text='Ingrese sus credenciales', font=(None, 16)).pack(pady=(0, 30))
+        # Fondo con Logo (Igual que en el APK)
+        self.canvas = tk.Canvas(self, highlightthickness=0)
+        self.canvas.pack(fill='both', expand=True)
+        
+        bg_logo_path = os.path.join('Imagenes', 'pikata.png')
+        if os.path.exists(bg_logo_path) and PIL_AVAILABLE:
+            self.bg_raw = Image.open(bg_logo_path).convert('RGBA')
+            self.bg_res = self.bg_raw.resize((500, 700), Image.LANCZOS)
+            
+            self.bg_photo = ImageTk.PhotoImage(self.bg_res)
+            self.canvas.create_image(250, 350, image=self.bg_photo)
+        else:
+            self.canvas.config(bg='#2b3e50')
 
-        # Campo de Usuario con fuente más grande
-        self.username = ttk.Entry(container, font=(None, 16), bootstyle="info")
-        self.username.pack(fill='x', pady=10)
+        # Usar el canvas directamente para los textos (para que tengan fondo transparente)
+        self.canvas.create_text(250, 150, text='Bienvenido', font=("Helvetica", 28, 'bold'), fill="white")
+        self.canvas.create_text(250, 200, text='Ingrese sus credenciales', font=("Helvetica", 16), fill="white")
+
+        # Campo de Usuario
+        self.username = ttk.Entry(self, font=(None, 16), bootstyle="info")
         self.username.insert(0, 'Usuario')
         self.username.bind('<FocusIn>', lambda e: self.username.delete(0, 'end') if self.username.get() == 'Usuario' else None)
+        self.canvas.create_window(250, 260, window=self.username, width=360, height=45)
 
-        # Campo de Contraseña con fuente más grande
-        self.password = ttk.Entry(container, show='*', font=(None, 16), bootstyle="info")
-        self.password.pack(fill='x', pady=10)
+        # Campo de Contraseña
+        self.password = ttk.Entry(self, show='*', font=(None, 16), bootstyle="info")
+        self.canvas.create_window(250, 330, window=self.password, width=360, height=45)
 
-        # Botones de login y cancelación más grandes
-        self.btn_login = ttk.Button(container, text='INICIAR SESIÓN', bootstyle="info", command=self.try_login, cursor="hand2", padding=15)
-        self.btn_login.pack(fill='x', pady=(25, 10))
-        ttk.Button(container, text='Cancelar', bootstyle="secondary-outline", command=self.cancel, cursor="hand2", padding=10).pack(fill='x')
+        # Botones de login y cancelación
+        self.btn_login = ttk.Button(self, text='INICIAR SESIÓN', bootstyle="info", command=self.try_login, cursor="hand2")
+        self.canvas.create_window(250, 410, window=self.btn_login, width=360, height=50)
         
+        btn_cancel = ttk.Button(self, text='Cancelar', bootstyle="secondary-outline", command=self.cancel, cursor="hand2")
+        self.canvas.create_window(250, 480, window=btn_cancel, width=360, height=45)
+
+        # Pie de página con Derechos de Autor
+        self.canvas.create_text(250, 560, text='© YAFA SOLUTIONS', font=("Helvetica", 10, 'bold'), fill="#e0e0e0")
+
         # Atajos de teclado para login
         self.bind('<Return>', lambda e: self.try_login())
         self.bind('<Tab>', lambda e: "continue") # Asegurar que Tab funcione para saltar campos
-
-        # Pie de página con Derechos de Autor
-        ttk.Label(container, text='© YAFA SOLUTIONS', font=(None, 10, 'bold'), bootstyle="secondary").pack(pady=(20, 0))
 
         # Configuración de foco inicial y atajos de teclado
         self.username.focus_set()
@@ -3022,6 +4499,9 @@ class LoginWindow(ttk.Toplevel):
         
         # Manejar el cierre por la "X" de la ventana
         self.protocol("WM_DELETE_WINDOW", self.cancel)
+        
+        # Mostrar la ventana final ya renderizada
+        self.deiconify()
 
     def _get_client_identifier(self):
         """Obtener identificador único del cliente para bloqueos estrictos."""
@@ -3029,7 +4509,7 @@ class LoginWindow(ttk.Toplevel):
         try:
             identifiers = [socket.gethostname(), getpass.getuser(), str(uuid.getnode())]
             return hashlib.sha256(''.join(identifiers).encode()).hexdigest()
-        except:
+        except Exception:
             return "unknown_client"
 
     def try_login(self):
@@ -3127,7 +4607,7 @@ class LoginWindow(ttk.Toplevel):
     def _handle_failed_login(self, user_id, username, reason):
         """Procesa un intento fallido y bloquea si es necesario."""
         try: self.db.log_access(user_id, username, 'failed_login', reason)
-        except: pass
+        except Exception: pass
         
         attempts = self.failed_attempts.get(username, 0) + 1
         self.failed_attempts[username] = attempts
@@ -3135,7 +4615,7 @@ class LoginWindow(ttk.Toplevel):
         if attempts >= 5:
             self.locked_until = datetime.now() + timedelta(minutes=15)
             try: self.db.log_access(user_id, username, 'account_locked', f'IP/Client: {self.client_id}')
-            except: pass
+            except Exception: pass
             messagebox.showwarning(
                 "Demasiados Intentos",
                 "Ha excedido el número de intentos permitidos.\n"
@@ -3150,14 +4630,166 @@ class LoginWindow(ttk.Toplevel):
         self.destroy()
 
 
-class App(ttk.Window):
+from collections import OrderedDict
+
+class LRUImageCache:
+    """Caché LRU (Least Recently Used) para prevenir fugas de memoria por imágenes no liberadas."""
+    def __init__(self, max_size=50):
+        self.cache = OrderedDict()
+        self.max_size = max_size
+
+    def get(self, key, load_func, *args, **kwargs):
+        if key in self.cache:
+            self.cache.move_to_end(key)
+            return self.cache[key]
+        
+        img = load_func(*args, **kwargs)
+        if img:
+            self.cache[key] = img
+            if len(self.cache) > self.max_size:
+                # Elimina el menos recientemente usado
+                removed_key, removed_img = self.cache.popitem(last=False)
+                del removed_img # Forzar GC
+        return img
+        
+    def clear(self):
+        self.cache.clear()
+
+class PublicidadTVFrame(tk.Canvas):
+    def __init__(self, parent, *args, **kwargs):
+        super().__init__(parent, bg='black', highlightthickness=0, *args, **kwargs)
+        self.media_list = []
+        self.current_idx = 0
+        self.is_playing = False
+        self.video_cap = None
+        self.after_id = None
+        self.image_photo = None
+        self.width = 800
+        self.height = 600
+        
+        import os
+        self.ads_dir = os.path.abspath(os.path.join('Imagenes', 'publicidad'))
+        self.refresh_media_list()
+        
+        self.bind("<Configure>", self.on_resize)
+        
+        self.btn_salir = ttk.Button(self, text="✖ Cerrar Sesión", bootstyle="danger", command=self.exit_tv, padding=10)
+        self.create_window(20, 20, window=self.btn_salir, anchor='nw', tags="ui")
+        
+    def refresh_media_list(self):
+        import os
+        self.media_list = []
+        if os.path.exists(self.ads_dir):
+            for f in os.listdir(self.ads_dir):
+                if f.lower().endswith(('.png', '.jpg', '.jpeg', '.webp', '.avif', '.mp4', '.avi', '.mov')):
+                    self.media_list.append(os.path.join(self.ads_dir, f))
+                    
+    def on_resize(self, event):
+        self.width = event.width
+        self.height = event.height
+        if not self.is_playing and self.media_list:
+            self.is_playing = True
+            self.play_next()
+            
+    def play_next(self):
+        if not self.media_list: return
+        file_path = self.media_list[self.current_idx]
+        self.current_idx = (self.current_idx + 1) % len(self.media_list)
+        
+        if file_path.lower().endswith(('.mp4', '.avi', '.mov')):
+            self.play_video(file_path)
+        else:
+            self.show_image(file_path)
+            
+    def show_image(self, file_path):
+        try:
+            from PIL import Image, ImageTk
+            img = Image.open(file_path)
+            img.thumbnail((self.width, self.height), Image.Resampling.LANCZOS)
+            bg = Image.new('RGB', (self.width, self.height), (0, 0, 0))
+            offset = ((self.width - img.width) // 2, (self.height - img.height) // 2)
+            bg.paste(img, offset)
+            
+            self.image_photo = ImageTk.PhotoImage(bg)
+            self.delete("media")
+            self.create_image(self.width//2, self.height//2, image=self.image_photo, tags="media")
+            self.tag_lower("media")
+        except Exception as e:
+            import logging
+            logging.error(f"Error cargando imagen TV: {e}")
+            
+        self.after_id = self.after(10000, self.play_next)
+        
+    def play_video(self, file_path):
+        try:
+            if not CV2_AVAILABLE:
+                self.show_image(file_path) 
+                return
+            
+            import cv2
+            self.video_cap = cv2.VideoCapture(file_path)
+            fps = self.video_cap.get(cv2.CAP_PROP_FPS) or 30
+            self.delay = max(10, int(1000 / fps))
+            self.update_video_frame()
+        except Exception as e:
+            import logging
+            logging.error(f"Error iniciando video TV: {e}")
+            self.play_next()
+            
+    def update_video_frame(self):
+        if not getattr(self, 'video_cap', None): return
+        ret, frame = self.video_cap.read()
+        if ret:
+            try:
+                import cv2
+                from PIL import Image, ImageTk
+                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                img = Image.fromarray(frame)
+                img.thumbnail((self.width, self.height), Image.Resampling.LANCZOS)
+                bg = Image.new('RGB', (self.width, self.height), (0, 0, 0))
+                offset = ((self.width - img.width) // 2, (self.height - img.height) // 2)
+                bg.paste(img, offset)
+                
+                self.image_photo = ImageTk.PhotoImage(bg)
+                self.delete("media")
+                self.create_image(self.width//2, self.height//2, image=self.image_photo, tags="media")
+                self.tag_lower("media")
+                self.after_id = self.after(self.delay, self.update_video_frame)
+            except Exception as e:
+                import logging
+                logging.error(f"Error frame video: {e}")
+                if getattr(self, 'video_cap', None):
+                    self.video_cap.release()
+                    self.video_cap = None
+                self.play_next()
+        else:
+            if getattr(self, 'video_cap', None):
+                self.video_cap.release()
+                self.video_cap = None
+            self.play_next()
+            
+    def exit_tv(self):
+        if getattr(self, 'after_id', None):
+            self.after_cancel(self.after_id)
+        if getattr(self, 'video_cap', None):
+            self.video_cap.release()
+            
+        app = self.winfo_toplevel()
+        if hasattr(app, 'logout'):
+            app.logout()
+
+class App(tk.Tk):
     """
     Clase Principal de la Aplicación.
     Gestiona el ciclo de vida del programa, el login persistente y el dashboard principal.
     """
     def __init__(self):
-        # Iniciar ventana con el tema 'superhero' que es más moderno y agradable
-        super().__init__(themename="superhero")
+        # Iniciar ventana principal y ocultarla INMEDIATAMENTE antes de cargar temas
+        super().__init__()
+        self.withdraw()
+        
+        # Cargar el tema superhero
+        self.style = ttk.Style(theme="superhero")
         self.withdraw() # Ocultar ventana principal al inicio
         
         self.title('SISTEMA POS PIK\'TA - Gestión de Restaurante')
@@ -3184,6 +4816,7 @@ class App(ttk.Window):
         center_window(self, 1280, 800)
         self.state('zoomed')
         self.deiconify()
+        self.attributes('-alpha', 1.0) # Restaurar opacidad
         
         # Pie de página global con Derechos de Autor
         footer = ttk.Frame(self, bootstyle="secondary", padding=5)
@@ -3205,7 +4838,7 @@ class App(ttk.Window):
             # Para otros casos, buscar el primer widget que acepte foco
             else:
                 frame.focus_set()
-        except:
+        except Exception:
             pass
 
     def _focus_kds_list(self, frame):
@@ -3216,7 +4849,7 @@ class App(ttk.Window):
                 if not frame.listbox.curselection():
                     frame.listbox.selection_set(0)
                     frame.listbox.activate(0)
-        except:
+        except Exception:
             pass
 
     def run_login_loop(self):
@@ -3310,6 +4943,14 @@ class App(ttk.Window):
         self.notebook.bind('<<NotebookTabChanged>>', self._on_tab_changed)
 
         role = self.user.get('rol', '').lower()
+        
+        if role == 'publicidad':
+            header.pack_forget() # Ocultar cabecera superior para pantalla completa
+            tv_frame = PublicidadTVFrame(self.notebook)
+            self.notebook.add(tv_frame, text='TV')
+            self.notebook.select(tv_frame)
+            return
+
         bg_logo_path = os.path.join('Imagenes', 'pikta2.png')
 
         # --- Dashboard (Pestaña Inicial) ---
@@ -3320,7 +4961,7 @@ class App(ttk.Window):
 
         # Variables para control de renderizado y caché
         self.last_dash_w, self.last_dash_h = 0, 0
-        self.dash_icons_cache = {}
+        self.image_cache = LRUImageCache(max_size=50)
         if os.path.exists(bg_logo_path) and PIL_AVAILABLE:
             self.bg_image_raw = Image.open(bg_logo_path)
         else:
@@ -3437,10 +5078,7 @@ class App(ttk.Window):
                 
                 # Cargar e insertar imagen (usando caché)
                 img_path = os.path.join('Imagenes', img_name)
-                if img_path not in self.dash_icons_cache:
-                    self.dash_icons_cache[img_path] = load_image(img_path, size=(90, 90))
-                
-                card_icon = self.dash_icons_cache[img_path]
+                card_icon = self.image_cache.get(img_path, load_image, img_path, size=(90, 90))
                 if card_icon:
                     # Guardar referencia para que no se pierda
                     if not hasattr(home, 'icons'): home.icons = {}
@@ -3491,6 +5129,17 @@ class App(ttk.Window):
         """Cambia a la pestaña del Punto de Venta."""
         idx, frame = self._get_or_create_tab('Caja / POS', POSFrame)
         self.notebook.select(idx)
+        
+        # --- Sincronizar sesión activa desde la DB si no está cargada ---
+        if hasattr(frame, 'session_id') and not frame.session_id:
+            last_session = self.db.fetch_one(
+                "SELECT id FROM caja_sesiones WHERE usuario_id = ? AND estado = 'ABIERTO' ORDER BY id DESC LIMIT 1",
+                (self.user.get('id'),)
+            )
+            if last_session:
+                frame.session_id = last_session[0]
+                logging.info(f"Sesión de caja #{frame.session_id} recuperada para {self.user.get('username')}")
+
         # Solo renderizar si no hay hijos o para refrescar datos importantes
         if hasattr(frame, 'products_frame') and not frame.products_frame.winfo_children():
             if hasattr(frame, 'render_products'): frame.render_products()
@@ -3535,7 +5184,8 @@ class App(ttk.Window):
         return self.notebook.index('end') - 1, frame
 
     def logout(self):
-        """Cierra la sesión del usuario y regresa a la pantalla de login."""
+        """Cierra la sesión del usuario y regresa a la pantalla de login con limpieza profunda de memoria."""
+        import gc
         try:
             if self.session_token:
                 session_manager.close_session(self.session_token)
@@ -3551,9 +5201,20 @@ class App(ttk.Window):
         self.user = None
         self.session_token = None
         
+        # 1. Limpiar caché de imágenes LRU
+        if hasattr(self, 'image_cache'):
+            self.image_cache.clear()
+            
+        # 2. Limpiar referencias directas a imágenes en Canvas/Notebook
+        if hasattr(self, 'icons'):
+            self.icons.clear()
+        
         # Eliminar todos los widgets actuales para reconstruir desde cero al re-loguear
         for widget in self.winfo_children():
             widget.destroy()
+            
+        # 3. Forzar Garbage Collection profundo antes de re-iniciar
+        gc.collect()
             
         # Reiniciar el bucle de login
         self.run_login_loop()
@@ -3570,11 +5231,79 @@ class App(ttk.Window):
                   font=(None, 10, 'bold'), bootstyle="inverse-secondary").pack()
 
 
+def check_dependencies():
+    """Verifica dependencias críticas antes de iniciar."""
+    missing = []
+    
+    try:
+        import bcrypt
+    except ImportError:
+        missing.append("bcrypt")
+    
+    try:
+        from cryptography.fernet import Fernet
+    except ImportError:
+        missing.append("cryptography")
+    
+    try:
+        import PIL
+    except ImportError:
+        missing.append("Pillow")
+        
+    try:
+        import cv2
+    except ImportError:
+        missing.append("opencv-python")
+    
+    if missing:
+        print("=" * 60)
+        print("ERROR: Faltan dependencias críticas:")
+        for dep in missing:
+            print(f"  - {dep}")
+        print("\nInstale con:")
+        print(f"  pip install {' '.join(missing)}")
+        print("=" * 60)
+        sys.exit(1)
+
 # =============================================================================
 # PUNTO DE ENTRADA DEL PROGRAMA
 # =============================================================================
 if __name__ == '__main__':
+    check_dependencies()
     multiprocessing.freeze_support()
+    
+    # ---------------------------------------------------------
+    # SEGURIDAD: Prevenir ejecución múltiple (Single Instance)
+    # ---------------------------------------------------------
+    import ctypes
+    # Se crea un Mutex con nombre único para el sistema
+    mutex_name = "PIKTA_POS_SYSTEM_MUTEX_UNIQUE_2026"
+    mutex = ctypes.windll.kernel32.CreateMutexW(None, False, mutex_name)
+    last_error = ctypes.windll.kernel32.GetLastError()
+    
+    if last_error == 183: # ERROR_ALREADY_EXISTS
+        import tkinter as tk
+        from tkinter import messagebox
+        import sys
+        
+        root = tk.Tk()
+        root.withdraw()
+        messagebox.showerror(
+            "Alerta de Seguridad", 
+            "El SISTEMA POS PIK'TA ya se encuentra en ejecución en este equipo.\n\n"
+            "Por razones de seguridad y para evitar conflictos con la base de datos, "
+            "no se permite abrir múltiples sesiones al mismo tiempo."
+        )
+        root.destroy()
+        sys.exit(0)
+    # ---------------------------------------------------------
+
+    # Iniciar Servidor API para APK Móvil (Opción B)
+    if api_server is not None:
+        api_thread = threading.Thread(target=api_server.run_server, daemon=True)
+        api_thread.start()
+        print("Servidor API (Móvil) iniciado en segundo plano.")
+
     # Crear e iniciar la aplicación principal
     app = App()
     app.mainloop()

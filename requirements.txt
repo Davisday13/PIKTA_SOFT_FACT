@@ -1,0 +1,13 @@
+flask
+flask-cors
+bcrypt
+cryptography
+pyotp
+PyJWT
+requests
+requests-toolbelt
+ttkbootstrap
+pillow
+pywin32;platform_system=="Windows"
+opencv-python
+pywebview
